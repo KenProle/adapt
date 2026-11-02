@@ -50,6 +50,5 @@ A new test needs all of: a method on `owasp_suite` named after the test id, an e
 
 ## Gotchas
 
-- `doc/src/` is a duplicate copy of `src/`; the code that runs is `src/`.
 - Code uses tabs for indentation.
 - `bin/aprint.aprint(msg, c)` is the logging helper (`c`: 0 INFO, 1 WARN, 2 CRIT). It prints nothing unless verbose is on, and in console mode it always labels output INFO, whatever `c` is.
