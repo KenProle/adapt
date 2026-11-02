@@ -228,6 +228,11 @@ class owasp_suite():
 		# and list the other URLs in misc.
 		seen = {}
 		for msg in messages:
+			# Only HTML can hold HTML comments; parsing images or scripts as
+			# HTML turns binary data and regex fragments into fake comments.
+			content_type = re.search(r"(?im)^content-type:\s*([^;\r\n]*)", str(msg.get('responseHeader', "")))
+			if (content_type and "html" not in content_type.group(1).lower()):
+				continue
 			try:
 				req = HTTPRequest.read_from_zap_message( msg )
 				if (self.zapReqHeader is None):
