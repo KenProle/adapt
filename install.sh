@@ -107,6 +107,7 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	do_command sudo apt-get install python3-venv python3-pip -y
 	do_command sudo apt-get install default-jre -y
 	do_command sudo apt-get install nmap -y
+	do_command sudo apt-get install bind9-dnsutils -y
 	do_command sudo apt-get install docker.io -y
 	do_command sudo apt-get install git -y
 	# ZAP 2.16+ needs Java 17 or newer; default-jre is older on some releases.

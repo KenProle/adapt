@@ -543,19 +543,54 @@ class owasp_suite():
 		return reports
 	def crypst_001(self):
 		ret = []
-		filename = os.getcwd()+"/tmp/ssl_test.json"
-		x = self.__sub_setup(os.getcwd()+self.args["adapt_general"]["testssl_loc"], "-oJ",filename,  self.dns_target)
-		(out, err) = x.communicate(None, 1000)
+		parsed = urlparse(self.unstripped_target)
+		if(parsed.scheme == "http"):
+			note = "Target uses plain http://, so no TLS configuration was tested (testssl.sh skipped)"
+			self.printer.aprint(note, 1)
+			return [create_report("crypst_001", note), create_report("crypst_002", note)]
 
-		with open(filename) as datafile:
-			testssl_results = json.load(datafile)
-		datafile.close()
+		try:
+			port = parsed.port or 443
+		except ValueError:
+			port = 443
+		testssl_target = self.dns_target+":"+str(port)
+
+		filename = os.getcwd()+"/tmp/ssl_test.json"
+		# testssl.sh refuses to overwrite an existing output file
+		try:
+			os.remove(filename)
+		except OSError as e:
+			if(e.errno != errno.ENOENT):
+				raise
+
+		failure = None
+		testssl_results = None
+		try:
+			x = self.__sub_setup(os.getcwd()+self.args["adapt_general"]["testssl_loc"], "-oJ", filename, testssl_target)
+			try:
+				(out, err) = x.communicate(None, 1000)
+			except subprocess.TimeoutExpired:
+				x.kill()
+				x.communicate()
+				raise
+			with open(filename) as datafile:
+				testssl_results = json.load(datafile)
+			if(not isinstance(testssl_results, dict)):
+				raise ValueError("unexpected testssl.sh output")
+		except Exception as e:
+			failure = str(e)
+			testssl_results = None
 
 		try:
 			os.remove(filename)
 		except OSError as e:
 			if(e.errno != errno.ENOENT):
 				raise
+
+		if(testssl_results is None):
+			note = "testssl.sh failed against "+testssl_target+" ("+failure+"); TLS configuration was not tested. Ensure dig, host, drill or nslookup is installed and the target accepts TLS connections"
+			self.printer.aprint(note, 1)
+			return [create_report("crypst_001", note), create_report("crypst_002", note)]
 
 		if(testssl_results["scanResult"] == []):
 			return []
