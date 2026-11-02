@@ -331,10 +331,10 @@ class owasp_suite():
 			reports.append( create_report( 'ident_004', basic_description="Response difference between valid and invalid usernames on login page", severity='low', request='', confidence=1.0, path=self.unstripped_target ) )
 
 		# rtt analysis, same general methodology
-		badpwd_rtts = [ int(msg['rtt']) for msg in badpwd_msgs ]
+		badpwd_rtts = [ float(msg['rtt']) for msg in badpwd_msgs ]
 		avg_badpwd = sum( badpwd_rtts ) / len( badpwd_rtts )
 
-		badun_rtts =  [ int(msg['rtt']) for msg in badun_msgs ]
+		badun_rtts =  [ float(msg['rtt']) for msg in badun_msgs ]
 		avg_badun = sum( badun_rtts ) / len( badun_rtts )
 		res = stats.ttest_ind( badpwd_rtts, badun_rtts, equal_var=False )
 		if( res.pvalue < 0.05 ):
@@ -349,8 +349,8 @@ class owasp_suite():
 			owasp_association="2",
 			misc=[
 				res._asdict(),
-				"{} v/i attempts with average rtt of {}".format( len( badpwd_rtts), avg_badpwd ),
-				"{} i/i attempts with average rtt of {}".format( len( badun_rtts), avg_badun )] ) )
+				"{} v/i attempts with average rtt of {:.1f} ms".format( len( badpwd_rtts), avg_badpwd ),
+				"{} i/i attempts with average rtt of {:.1f} ms".format( len( badun_rtts), avg_badun )] ) )
 			
 		return reports
 		
