@@ -27,7 +27,12 @@ ADAPT uses Python to create an automated framework to use industry standard tool
     * OTG-SESS-002 – Cookie Attributes
 
 ## Installing the Plugin
-1. [Detailed install instructions](https://github.com/secdec/adapt/wiki/Installation).
+ADAPT targets Linux (tested on Ubuntu 26.04 under WSL2). From the repo root, as a normal user (not root):
+
+    ./install.sh
+    python3 adapt.py --target http://localhost
+
+See [doc/installing.md](doc/installing.md) for details, including WSL notes, and [doc/configuration_file.md](doc/configuration_file.md) for configuration.
 
 # For Developers & Contributors
 ADAPT is an open source software that encourages community collaboration. Collaboration requires cloning the ADAPT repository from https://github.com/secdec/adapt. It is encouraged that a potential contributor clones ADAPT in a UNIX environment. Cloning in a windows environment may disturb the line endings if certain settings are configured such as autocrlf = true. To ensure that this does not occur when working in a Windows based environment locate your global git.config and disable autocrlf. 

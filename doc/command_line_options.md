@@ -2,8 +2,7 @@
 
 
 --target <host>: Manually set host as target
---verbose : Turn on verbose mode
---gui : Turn on GUI mode
+--verbose : Turn on verbose mode (ADAPT prints nothing without it)
 --output <filename> : Specify an output file to put results into 
 --append <filename> : Specify an output file to append results to
 --risk <[low, medium, high, paranoid]> : Specify how sensitive the results will be to discovered risks. 
@@ -15,3 +14,5 @@
 	full : Even more information with regards to misc information that may have been scraped. 
 	owasp10 : An output method that reports only the vulnerabilities in regards to the owasp top 10. (report detail is otherwise full) 
 -h, --help : Show help
+
+Run as `python3 adapt.py ...` from the repo root; it re-runs itself under `.venv` automatically. Command line values override `adapt.config`.
