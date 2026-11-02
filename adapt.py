@@ -161,6 +161,16 @@ def __unsupported_value(label, value, correct):
 	print("Please use any from: "+str(correct))
 	sys.exit(1)
 
+def __format_from_filename(filename, supported):
+	ext = os.path.splitext(filename)[1].lstrip(".").lower()
+	if(ext == ""):
+		print("Output file '"+filename+"' has no extension; it selects the output format.")
+		print("Please use a file name ending in one of: "+", ".join("."+x for x in supported))
+		sys.exit(1)
+	if(ext not in supported):
+		__unsupported_value("output file format", ext, supported)
+	return ext
+
 def ssh_capture_dmesg_logs(args):
 	printer.aprint("Getting ssh logs")
 	hostname = args["ssh_config"]["hostname"]
@@ -255,17 +265,19 @@ def main():
 		args["adapt_general"]["target_name"] = command_line_args.target
 	if(command_line_args.verbose):
 		args["adapt_general"]["verbose"] = True
+	if(command_line_args.output != None and command_line_args.append != None):
+		print("Use either --output or --append, not both.")
+		sys.exit(1)
 	if(command_line_args.output != None):
 		args["adapt_general"]["output_file"] = command_line_args.output
-		# get the filetype for the output file 
-		args["output_format"] = command_line_args.output.split(".")[-1]
-		if(args["adapt_general"]["output_format"] not in supported_file_formats):
-			__unsupported_value("output file format", args["adapt_general"]["output_format"], supported_file_formats)
+		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.output, supported_file_formats)
 	if(command_line_args.append != None):
 		args["adapt_general"]["output_file"] = command_line_args.append
-		args["adapt_general"]["output_format"] = command_line_args.append.split(".")[-1]
-		if(args["adapt_general"]["output_format"] not in supported_file_formats):
-			__unsupported_value("output file format", args["adapt_general"]["output_format"], supported_file_formats)
+		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.append, supported_file_formats)
+		if(args["adapt_general"]["output_format"] == "xml"):
+			print("--append only supports json output files, not xml.")
+			sys.exit(1)
+		args["adapt_general"]["append"] = True
 
 	if(command_line_args.conf != None):
 		if(command_line_args.conf not in supported_risk_conf_values):
