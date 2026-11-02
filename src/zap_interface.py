@@ -92,7 +92,7 @@ class AdaptZap():
 	def send_request(self, request):
 		resp = self.zap.core.send_request(request)
 		if( not isinstance(resp, list) or not isinstance(resp[0], dict)):
-			raise Exception("Request {} failed during test_logins. Expected zap message, got: {}".format(request, resp))
+			raise Exception("ZAP sendRequest failed for request {!r}: expected a ZAP message, got: {}".format(request, resp))
 		return resp[0]
 
 	def create_new_session(self, username, password):

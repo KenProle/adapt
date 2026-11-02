@@ -21,7 +21,7 @@
 try:
 	import re, subprocess, time, urllib.request, requests, random, copy, os
 	import scipy.stats as stats
-	import itertools, os, errno, json
+	import itertools, os, errno, json, socket, ssl, sys, traceback
 	from aprint import aprint
 	from urllib.parse import urlparse
 	from difflib import SequenceMatcher
@@ -50,7 +50,7 @@ def __type_check(val, t):
 def wait_min(count):
 	sleep(count*60)
 
-def create_report(name, basic_description="", severity="none", request="", confidence=1.0, misc=[], path="", cwe=None, related_cwes=[], preventions=[], owasp_association=None):
+def create_report(name, basic_description="", severity="none", request="", confidence=1.0, misc=[], path="", cwe=None, related_cwes=[], preventions=[], owasp_association=None, error=False):
 
 	if(not __type_check(name, str)):
 		name = ""
@@ -82,7 +82,10 @@ def create_report(name, basic_description="", severity="none", request="", confi
 		"cwe_id":cwe,
 		"related_cwes":related_cwes,
 		"preventions":preventions,
-		"owasp_association":owasp_association
+		"owasp_association":owasp_association,
+		# True when the test itself failed to run; adapt_analysis lists
+		# these under "errors" instead of treating them as findings
+		"error":bool(error)
 	}
 
 	return ret
@@ -130,12 +133,18 @@ class owasp_suite():
 				continue
 			self.printer.aprint("Invoking test: {}...".format(i))
 			internal = getattr(self, i)
-			#try:
-			int_res = internal()
-			#except Exception as e:
-			#	self.printer.aprint("Runtime error with test "+i+": "+str(e), 2)
-			#	ret.append(create_report(i, "ERROR: "+str(e)))
-			#	continue
+			# One failing test must not take down the whole run: record the
+			# failure as an error entry for this test and carry on.
+			try:
+				int_res = internal()
+			except Exception as e:
+				err = "{}: {}".format(type(e).__name__, e)
+				tb = traceback.format_exc()
+				self.printer.aprint("Runtime error with test {}: {}\n{}".format(i, err, tb), 2)
+				# aprint is silent without --verbose, so always say it somewhere visible
+				print("ADAPT: test {} failed and was skipped: {}".format(i, err), file=sys.stderr)
+				ret.append(create_report(i, "ERROR: test {} failed to run: {}".format(i, err), misc=tb.splitlines(), error=True))
+				continue
 			if(int_res is None):
 				self.printer.aprint("Test {} may not be implemented".format(i))
 			elif(type(int_res) == list):
@@ -437,21 +446,37 @@ class owasp_suite():
 		return []
 	def inpval_003(self):
 		report_list = []
-		msg = None
-		sev = "none"
-		req = None
-		conf = 1.0
+		results = []
+		errors = 0
 
 		# get and post are standardized, there is no error if they give a page
 		# BLAH is not a real http verb. This makes some web servers give interesting errors
 		methods = ["PUT", "TRACE", "CONNECT", "PROPFIND", "DELETE", "PATCH", "BLAH"]
 
-		# Not in try-catch. If something goes wrong, fail visibly
 		for m in methods:
-			req = "{} {}/ HTTP/1.0\r\n\r\n".format(m, self.unstripped_target)
-			resp = self.zap.send_request( req )
+			try:
+				if(m == "CONNECT"):
+					# ZAP's sendRequest API rejects CONNECT (it only knows
+					# CONNECT as the proxy tunnel handshake), so send it
+					# ourselves, in the authority form a real client uses.
+					req, resp = self.__raw_connect()
+				else:
+					req = "{} {}/ HTTP/1.0\r\n\r\n".format(m, self.unstripped_target)
+					resp = self.zap.send_request( req )
+				status = int(resp["responseHeader"].split()[1])
+			except Exception as e:
+				errors += 1
+				self.printer.aprint("inpval_003: {} request failed: {}".format(m, e), 1)
+				results.append("{}: ERROR, not tested ({}: {})".format(m, type(e).__name__, e))
+				continue
+
+			results.append("{}: HTTP {}".format(m, status))
 			html = str(resp['responseBody'])
-			if(int(resp["responseHeader"].split()[1]) == 200):
+			if(m == "CONNECT"):
+				if(200 <= status < 300):
+					report_list.append(create_report("inpval_003", "Server accepted a CONNECT request and may act as an open proxy/tunnel.", severity="medium", request=req, cwe=441, confidence=1.0))
+				continue
+			if(status == 200):
 				report_list.append(create_report("inpval_003", "Valid response from potentially vulnerable verbs.", severity="low", request=req, confidence=1.0))
 				if( html ):
 					soup = BeautifulSoup( html, 'html.parser' )
@@ -463,7 +488,60 @@ class owasp_suite():
 							misc = misc[:97] + "..."
 						report = create_report("inpval_003", msg, severity="low", request=req, cwe=285, confidence=1.0, misc=[misc])
 						report_list.append( report )
+
+		# Always record what each verb got back, including the ones that could not be sent
+		desc = "HTTP verb tampering: response status per method"
+		if(errors):
+			desc += " ({} of {} methods could not be tested)".format(errors, len(methods))
+		report_list.append(create_report("inpval_003", desc, severity="none", request=self.unstripped_target, confidence=1.0, misc=results))
 		return report_list
+
+	def __raw_connect(self, timeout=10, max_bytes=65536):
+		"""Send 'CONNECT host:port HTTP/1.1' straight to the target and return
+		(request, {"responseHeader", "responseBody"}) shaped like a ZAP message."""
+		u = urlparse(self.unstripped_target)
+		https = (u.scheme == "https")
+		host = u.hostname
+		port = u.port or (443 if https else 80)
+		authority = "{}:{}".format(host, port)
+		req = "CONNECT {0} HTTP/1.1\r\nHost: {0}\r\n\r\n".format(authority)
+
+		sock = socket.create_connection((host, port), timeout=timeout)
+		try:
+			if(https):
+				ctx = ssl.create_default_context()
+				# pentest target: certificate problems are reported elsewhere
+				ctx.check_hostname = False
+				ctx.verify_mode = ssl.CERT_NONE
+				sock = ctx.wrap_socket(sock, server_hostname=host)
+			sock.sendall(req.encode("ascii"))
+			data = b""
+			# Read the response head; a server that accepts CONNECT keeps the
+			# tunnel open, so never wait for the connection to close.
+			while(b"\r\n\r\n" not in data and len(data) < max_bytes):
+				chunk = sock.recv(4096)
+				if(not chunk):
+					break
+				data += chunk
+			head, _, body = data.partition(b"\r\n\r\n")
+			m = re.search(rb"\r\ncontent-length:\s*(\d+)", head, re.I)
+			want = min(int(m.group(1)), max_bytes) if m else 0
+			try:
+				while(len(body) < want):
+					chunk = sock.recv(4096)
+					if(not chunk):
+						break
+					body += chunk
+			except socket.timeout:
+				pass
+		finally:
+			sock.close()
+		if(not head):
+			raise Exception("no response to {}".format(req.splitlines()[0]))
+		return req, {
+			"responseHeader":head.decode("iso-8859-1"),
+			"responseBody":body.decode("utf-8", "replace")
+		}
 
 	def config_006(self):
 
