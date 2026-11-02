@@ -27,6 +27,11 @@ fi
 
 launch_dir=$(pwd)
 
+# To upgrade ZAP, change this version and re-run the installer.
+ZAP_VERSION=2.17.0
+ZAP_DIR=/opt/ZAP_$ZAP_VERSION
+ZAP_URL=https://github.com/zaproxy/zaproxy/releases/download/v$ZAP_VERSION/ZAP_${ZAP_VERSION}_Linux.tar.gz
+
 function do_command {
 	echo -n "$@: "
 	$@ &>/dev/null
@@ -76,25 +81,47 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	do_command sudo apt-get install docker.io -y
 	do_command sudo apt-get install git -y
 	do_command sudo apt-get install python-pip python-dev libffi-dev libssl-dev libxml2-dev libxslt1-dev libjpeg8-dev zlib1g-dev
-	echo -n "Checking for zap: "
-	if [ ! -d /opt/ZAP_2.7.0 ]
+	# ZAP 2.16+ needs Java 17 or newer; default-jre is older on some releases.
+	echo -n "Checking for Java 17+: "
+	java_major=$(java -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1)
+	if [[ -n "$java_major" && "$java_major" -ge 17 ]]
 	then
-		echo "NOT FOUND"
-		echo -n "Installing zap: "
-		sudo apt-get install wget -y &> /dev/null
-		sudo wget -q -O /opt/zap.tar.gz https://github.com/zaproxy/zaproxy/releases/download/2.7.0/ZAP_2.7.0_Linux.tar.gz &> /dev/null
-		sudo tar -xf /opt/zap.tar.gz -C /opt
-		if [[ -d /opt/ZAP_2.7.0 ]]
+		echo "FOUND (Java $java_major)"
+	else
+		echo "NOT FOUND (Java ${java_major:-none})"
+		echo -n "Installing openjdk-17-jre: "
+		if sudo apt-get install openjdk-17-jre -y &> /dev/null
 		then
-			sudo rm /opt/zap.tar.gz
 			echo "DONE"
 		else
 			echo "FAILED"
 			exit 1
 		fi
+	fi
+
+	# ZAP is installed to /opt/ZAP_<version>, and /opt/zap points at it, so
+	# zap_general.path in var/configuration.json never needs to change.
+	echo -n "Checking for zap $ZAP_VERSION: "
+	if [ ! -d "$ZAP_DIR" ]
+	then
+		echo "NOT FOUND"
+		echo -n "Installing zap $ZAP_VERSION: "
+		sudo apt-get install wget -y &> /dev/null
+		if sudo wget -q -O /opt/zap.tar.gz "$ZAP_URL" &&
+			sudo tar -xf /opt/zap.tar.gz -C /opt &&
+			[[ -d "$ZAP_DIR" ]]
+		then
+			sudo rm -f /opt/zap.tar.gz
+			echo "DONE"
+		else
+			sudo rm -f /opt/zap.tar.gz
+			echo "FAILED (could not download or unpack $ZAP_URL)"
+			exit 1
+		fi
 	else
 		echo "FOUND"
 	fi
+	sudo ln -sfn "$ZAP_DIR" /opt/zap
 	
 	# checking for wig
 	echo -n "Checking for wig: "

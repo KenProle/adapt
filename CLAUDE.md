@@ -11,7 +11,7 @@ ADAPT (Automated Dynamic Application Penetration Testing) is a Python 3 tool tha
 All commands must be run from the repo root: every module resolves paths via `os.getcwd()` (e.g. `./var/configuration.json`, `./tmp/`, `./output/`, `./lib/testssl.sh/`).
 
 - Install (Linux, run as a normal user, not root — it uses sudo internally): `./install.sh`
-  - Installs apt deps, ZAP 2.7.0 to `/opt/ZAP_2.7.0`, wig, and clones testssl.sh into `lib/`, SecLists into `var/`, then touches `var/adapt_installed`. `adapt.py` re-runs the installer automatically if any of those markers are missing.
+  - Installs apt deps, Java 17+, ZAP (version set by `ZAP_VERSION` in `install.sh`) to `/opt/ZAP_<version>` with a `/opt/zap` symlink that `zap_general.path` uses, wig, and clones testssl.sh into `lib/`, SecLists into `var/`, then touches `var/adapt_installed`. `adapt.py` re-runs the installer automatically if any of those markers are missing.
 - Clean: `./install.sh clean`
 - Run: `python3 adapt.py [--target URL] [--output file.json|.xml] [--append file] [--risk low|medium|high|paranoid] [--conf ...] [--detail low|medium|high|full|owasp10] [--verbose]`
 - Test an auth module standalone: `python3 login_format.py` (calls `service_auth("admin","password")` and prints the result).

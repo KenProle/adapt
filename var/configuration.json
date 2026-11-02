@@ -95,7 +95,7 @@
             "-config",
             "newsessionprompt=false"
         ],
-        "path": "/opt/ZAP_2.7.0/zap.sh",
+        "path": "/opt/zap/zap.sh",
         "port": "34485",
         "pscan_turned_on": true,
         "spider_turned_on": true
