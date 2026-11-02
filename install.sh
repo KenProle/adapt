@@ -32,15 +32,18 @@ ZAP_VERSION=2.17.0
 ZAP_DIR=/opt/ZAP_$ZAP_VERSION
 ZAP_URL=https://github.com/zaproxy/zaproxy/releases/download/v$ZAP_VERSION/ZAP_${ZAP_VERSION}_Linux.tar.gz
 
+# Run a command quietly; print DONE, or FAILED plus the command's output and abort.
 function do_command {
-	echo -n "$@: "
-	$@ &>/dev/null
-	if [[ ! $? ]]
+	echo -n "$*: "
+	local output
+	if output=$("$@" 2>&1)
 	then
-		echo "FAILED"
-		exit -1
-	else
 		echo "DONE"
+	else
+		local status=$?
+		echo "FAILED (exit $status)"
+		echo "$output"
+		exit 1
 	fi
 }
 
