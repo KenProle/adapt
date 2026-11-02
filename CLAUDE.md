@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-ADAPT (Automated Dynamic Application Penetration Testing) is a Python 3 tool that drives OWASP ZAP, nmap, testssl.sh and wig against a target web application, runs a set of OWASP Testing Guide checks (OTG-*), and writes filtered findings to JSON/XML. It targets Linux (developed on Ubuntu 16.04); macOS install is partial and Windows is unsupported. Clone with `autocrlf` disabled — CRLF line endings break `install.sh`.
+ADAPT (Automated Dynamic Application Penetration Testing) is a Python 3 tool that drives OWASP ZAP, nmap, testssl.sh and wig against a target web application, runs a set of OWASP Testing Guide checks (OTG-*), and writes filtered findings to JSON/XML. It targets Linux (developed on Ubuntu 16.04, currently tested on Ubuntu 26.04 / Python 3.14 under WSL2); macOS install is partial and native Windows is unsupported. `.gitattributes` forces LF line endings, which `install.sh` needs.
 
 ## Commands
 

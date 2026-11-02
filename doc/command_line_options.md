@@ -2,7 +2,7 @@
 
 
 --target <host>: Manually set host as target
---verbose : Turn on verbose mode (ADAPT prints nothing without it)
+--verbose : Turn on verbose mode (progress logging; without it ADAPT only prints errors, failed tests and where the results were written)
 --output <filename> : Specify an output file to put results into 
 --append <filename> : Specify an output file to append results to
 --risk <[low, medium, high, paranoid]> : Specify how sensitive the results will be to discovered risks. 

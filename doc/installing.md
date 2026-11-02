@@ -12,9 +12,9 @@ forking processes and storing results.
 
 ## Install
 
-Clone the repository with `autocrlf` disabled (CRLF line endings break
-`install.sh`), then from the repo root, as a normal user (it refuses to run as
-root and uses sudo internally):
+Clone the repository (its `.gitattributes` keeps LF line endings, which
+`install.sh` needs, even where `core.autocrlf` is on), then from the repo root,
+as a normal user (it refuses to run as root and uses sudo internally):
 
     ./install.sh
 
@@ -51,8 +51,8 @@ directory) for details. Authentication modules shipped in the repo root:
 
 ## WSL
 
-* Clone and run from the Linux filesystem (e.g. `~/adapt`), not `/mnt/c/...`.
-  Windows checkouts can get CRLF line endings, and `/mnt/c` is slow.
+* Clone and run from the Linux filesystem (e.g. `~/adapt`), not `/mnt/c/...`,
+  which is much slower and doesn't handle Linux file ownership and permissions.
 * With WSL's default NAT networking, a target running on Windows is not reachable
   at `localhost` from inside WSL. Either use the Windows host IP:
 
