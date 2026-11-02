@@ -1,0 +1,5 @@
+# Keep LF line endings in the working tree on every platform. Scripts checked
+# out with CRLF fail under Linux/WSL ("/bin/bash^M: bad interpreter").
+* text=auto eol=lf
+
+*.png binary
