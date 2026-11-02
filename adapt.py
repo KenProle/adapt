@@ -28,14 +28,22 @@ if(sys.version_info[0] < 3):
 	print("Please run ADAPT in python 3")
 	sys.exit()
 
-if(not os.path.isfile("./var/adapt_installed") or 
+if(not os.path.isfile("./var/adapt_installed") or
 	not os.path.isdir("./lib/testssl.sh") or
-	not os.path.isdir("./var/SecLists")):
+	not os.path.isdir("./var/SecLists") or
+	not os.path.isfile("./.venv/bin/python")):
 	import subprocess
 	print("It seems that you have not run the installer script.")
 	print("We will now run that briefly before continuing.")
 	subprocess.call(["./install.sh"])
-	
+
+# install.sh puts ADAPT's Python packages in ./.venv; re-run under it if
+# we were started with another interpreter (e.g. "python3 adapt.py").
+venv_dir = os.path.realpath("./.venv")
+venv_python = os.path.join(venv_dir, "bin", "python")
+if(os.path.isfile(venv_python) and os.path.realpath(sys.prefix) != venv_dir):
+	os.execv(venv_python, [venv_python] + sys.argv)
+
 
 sys.path.insert(0, os.getcwd()+"/src")
 sys.path.insert(0, os.getcwd()+"/var")
