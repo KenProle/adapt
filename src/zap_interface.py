@@ -18,13 +18,16 @@
 #  limitations under the License.
 #
 
-import os, sys, time, datetime, logging, subprocess, json, html, urllib, re, importlib
+import os, sys, time, datetime, logging, subprocess, json, html, urllib, urllib.request, re, importlib
 #from httpparser.httprequest import HTTPRequest
 from zapv2 import ZAPv2
 from aprint import aprint
 import progressbar
 
 class AdaptZap():
+	# Seconds to wait for ZAP's API to come up before giving up
+	ZAP_STARTUP_TIMEOUT = 180
+
 	def __init__(self, args):
 		self.args = args
 		self.printer = aprint(self.args["adapt_general"]["verbose"], "zap_interface")
@@ -160,16 +163,29 @@ class AdaptZap():
 		)
 		self.p = subprocess.Popen(zap_execve, stdout=open(os.devnull, "w"), shell=True)
 		self.printer.aprint("Waiting for zap startup... ")
-		bar = progressbar.ProgressBar(maxval=60, widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-		if(self.args["adapt_general"]["verbose"]):bar.start()
-		for i in range(60):
-			if(self.args["adapt_general"]["verbose"]):bar.update(i)
+
+		# Poll ZAP's API until it answers, instead of sleeping a fixed time:
+		# stop early if the ZAP process exits, and give up after a timeout.
+		version_url = "{}:{}/JSON/core/view/version/?apikey={}".format(self.host, self.port, self.api_key)
+		no_proxy = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+		start = time.time()
+		while(True):
+			exit_code = self.p.poll()
+			if(exit_code is not None):
+				raise Exception("ZAP exited during startup (exit code {}). Check that {} runs on its own and that Java 17+ is installed.".format(exit_code, self.zap_path))
+			try:
+				with no_proxy.open(version_url, timeout=2) as resp:
+					version = json.loads(resp.read().decode("utf-8"))["version"]
+				break
+			except Exception:
+				pass
+			if(time.time() - start > self.ZAP_STARTUP_TIMEOUT):
+				self.p.kill()
+				self.p.wait()
+				raise Exception("ZAP did not answer on {}:{} within {} seconds; giving up.".format(self.host, self.port, self.ZAP_STARTUP_TIMEOUT))
 			time.sleep(1)
-		if(i < 59):
-			self.printer.aprint("CANNOT LOAD ZAP. PLEASE CHECK FOR ZAP UPDATES.", c=2)
-			sys.exit(1)
-		if(self.args["adapt_general"]["verbose"]):bar.finish()
-		self.printer.aprint("DONE")
+
+		self.printer.aprint("ZAP {} ready after {:.0f}s".format(version, time.time() - start))
 		self.already_opened = True
 		return True
 
