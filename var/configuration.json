@@ -8,7 +8,7 @@
         "auth_text": null,
         "context_name": "http://localhost:8080/spring-mvc-showcase",
         "cwe_file": "/var/cwe_list.csv",
-        "default_password_file": "/var/SecLists/Passwords/Common-Credentials/10-million-password-list-top-100.txt",
+        "default_password_file": "/var/SecLists/Passwords/Common-Credentials/darkweb2017_top-100.txt",
         "default_username_file": "/var/SecLists/Usernames/top-usernames-shortlist.txt",
         "log_gui": false,
         "nmap_crawl_size": "50",
