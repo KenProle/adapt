@@ -27,15 +27,18 @@ fi
 
 launch_dir=$(pwd)
 
+# Run a command quietly; print DONE, or FAILED plus the command's output and abort.
 function do_command {
-	echo -n "$@: "
-	$@ &>/dev/null
-	if [[ ! $? ]]
+	echo -n "$*: "
+	local output
+	if output=$("$@" 2>&1)
 	then
-		echo "FAILED"
-		exit -1
-	else
 		echo "DONE"
+	else
+		local status=$?
+		echo "FAILED (exit $status)"
+		echo "$output"
+		exit 1
 	fi
 }
 
