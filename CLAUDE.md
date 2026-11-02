@@ -48,6 +48,12 @@ A new test needs all of: a method on `owasp_suite` named after the test id, an e
 
 `[AUTH_OPTIONS] auth_module` names a `.py` file importable from the repo root that defines `service_auth(username, password)` returning a dict with `responseHeader`, `responseBody`, `requestHeader`, `requestBody` (str), `cookies` (dict), `rtt` (float) and `successful` (bool). All login-based tests (`AdaptZap.test_login` / `get_session`) go through this function. See `login_format.py` and `doc/authentication.md`.
 
+## Before merging a pull request
+
+Every PR gets an independent code review (`/code-review`) and a security review (`/security-review`) before it is merged, run by a fresh reviewer rather than the session or agent that wrote the change. Fix each finding or record in the PR why it was accepted, and re-review if the fixes are substantial. This applies to agent-written and human-written PRs alike, and to doc-only PRs (the security review can be brief there).
+
+Treat as security-sensitive and review closely: `install.sh` (runs sudo), anything that runs a subprocess or builds a shell command (ZAP launch, nmap, testssl.sh), file paths built from config or target input, raw sockets and requests sent to the target, and auth modules that handle credentials.
+
 ## Gotchas
 
 - Code uses tabs for indentation.
