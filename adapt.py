@@ -285,6 +285,21 @@ def main():
 	if(len(sys.argv) > 1):
 		sys.argv = [sys.argv[0]]
 
+	# Fail now, not after a long scan, if the report can't be written.
+	output_dirs = {"./output"}
+	if(args["adapt_general"]["output_file"]):
+		output_dirs.add(os.path.dirname(args["adapt_general"]["output_file"]) or ".")
+	for d in output_dirs:
+		try:
+			os.makedirs(d, exist_ok=True)
+		except OSError as e:
+			print("Cannot create output directory "+d+": "+str(e))
+			sys.exit(1)
+		if(not os.access(d, os.W_OK | os.X_OK)):
+			print("Output directory "+d+" is not writable by this user.")
+			print("If install.sh created it as root, re-run ./install.sh or run: sudo chown -R $USER: "+os.path.abspath(d))
+			sys.exit(1)
+
 	printer.aprint("Final config setup...")
 
 	if(args["zap_general"]["hidden"]):

@@ -18,7 +18,7 @@
 #  limitations under the License.
 #
 
-import json, datetime, csv, os, pathlib, time
+import json, datetime, csv, os, pathlib, time, tempfile
 from dicttoxml import dicttoxml
 
 _PARANOID_VALUE = -1.0
@@ -120,11 +120,12 @@ class adapt_analysis():
 		tm = datetime.datetime.now()
 		self.output_file = self.args["adapt_general"]["output_file"]
 		self.output_format = self.args["adapt_general"]["output_format"]
-		self.backup = "./output/adaptOut_{}_{}{}".format(tm.day, tm.hour, tm.minute)
+		backup_name = "adaptOut_{}_{}{}".format(tm.day, tm.hour, tm.minute)
 		if(self.output_file == None):
-			self.output_file = self.backup+".{}".format(self.output_format)
-		else:
-			self.backup = self.backup+".json"
+			self.output_file = "./output/"+backup_name+".{}".format(self.output_format)
+		# Fallback JSON file used if the output file cannot be written
+		self.backup = "./output/"+backup_name+"_backup.json"
+		self.last_resort = os.path.join(tempfile.gettempdir(), backup_name+".json")
 
 		self.ssh_scan_data = self.ssh_scan()
 
@@ -329,27 +330,36 @@ class adapt_analysis():
 		return x
 
 	def get_results(self):
-		pathlib.Path('./output/').mkdir(parents=True, exist_ok=True) 
-		if(self.output_format == "xml"):
-			xml = dicttoxml(self.final_results, attr_type=False)
-			f = open(self.output_file, "wb")
-			f.write(xml)
-			f.close()
-		else:
-			try:
+		try:
+			pathlib.Path('./output/').mkdir(parents=True, exist_ok=True)
+			if(self.output_format == "xml"):
+				xml = dicttoxml(self.final_results, attr_type=False)
+				with open(self.output_file, "wb") as f:
+					f.write(xml)
+			else:
 				if(self.args["adapt_general"]["append"] == True and os.path.isfile(self.output_file)):
 					with open(self.output_file, "r") as f:
 						d = json.load(f)
-						f.close()
-						d += self.final_results
-						self.final_results = d
+					d += self.final_results
+					self.final_results = d
 				with open(self.output_file, "w") as f:
 					json.dump(self.final_results, f, indent=4)
-					f.close()
-			except Exception as e:
-				with open(self.backup, "w") as f:
+			print("ADAPT results written to "+self.output_file)
+			return
+		except Exception as e:
+			print("Could not write results to "+self.output_file+": "+str(e))
+
+		# Don't lose a finished scan: fall back to JSON in ./output/, then
+		# to the system temp directory.
+		for path in (self.backup, self.last_resort):
+			try:
+				with open(path, "w") as f:
 					json.dump(self.final_results, f, indent=4)
-					f.close()
+				print("ADAPT results written to "+path+" instead")
+				return
+			except Exception as e:
+				print("Could not write results to "+path+": "+str(e))
+		raise RuntimeError("ADAPT could not write its results anywhere")
 
 
 	def __load_cwe(self):
