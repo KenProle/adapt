@@ -1,0 +1,11 @@
+# Python dependencies for ADAPT. install.sh installs these into ./.venv.
+beautifulsoup4
+dicttoxml
+lxml
+paramiko
+progressbar2
+python-nmap
+requests
+scipy
+zaproxy
+wig @ git+https://github.com/jekyc/wig

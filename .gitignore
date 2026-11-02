@@ -8,3 +8,4 @@ zap/
 SecLists/
 paramiko/
 testssl.sh
+.venv/

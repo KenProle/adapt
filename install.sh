@@ -63,27 +63,44 @@ if [ "$1" == "clean" ]; then
 	exit 0
 fi
 
+# Install the Python dependencies (requirements.txt, including wig) into
+# ./.venv as the current user. adapt.py re-runs itself with .venv/bin/python.
+# A venv avoids PEP 668 "externally-managed-environment" errors on current
+# distributions and keeps ADAPT's packages out of the system Python.
+function install_python_deps {
+	echo -n "Creating Python virtual environment (.venv): "
+	if [ -x "$launch_dir"/.venv/bin/python ] || python3 -m venv "$launch_dir"/.venv
+	then
+		echo "DONE"
+	else
+		echo "FAILED"
+		exit 1
+	fi
+	echo -n "Installing Python packages from requirements.txt: "
+	local output
+	if output=$("$launch_dir"/.venv/bin/pip install -r "$launch_dir"/requirements.txt 2>&1)
+	then
+		echo "DONE"
+	else
+		echo "FAILED"
+		echo "$output"
+		exit 1
+	fi
+}
+
 if [ "$(uname)" == "Darwin" ]; then
 echo "Installing for MacOSX"
-	pip3 install python-owasp-zap-v2.4
-	pip3 install beautifulsoup4
-	pip3 install lxml
-	pip3 install dicttoxml
-	pip3 install scipy
-	pip3 install paramiko
-	python3 setup.py install
+	install_python_deps
 elif [ "$(uname -s)" == "Linux" ]; then
 	sudo --validate # update sudo permissions, so we don't have to enter a passwd for the rest of the script
 	echo "Installing for Linux: "
 	echo "Please do not press anything until the script is finished, go take a break"
 	do_command sudo apt-get update -y
-	do_command sudo apt-get install python3-pip -y
-	do_command sudo apt-get install python3-scipy -y
+	do_command sudo apt-get install python3-venv python3-pip -y
 	do_command sudo apt-get install default-jre -y
 	do_command sudo apt-get install nmap -y
 	do_command sudo apt-get install docker.io -y
 	do_command sudo apt-get install git -y
-	do_command sudo apt-get install python-pip python-dev libffi-dev libssl-dev libxml2-dev libxslt1-dev libjpeg8-dev zlib1g-dev
 	# ZAP 2.16+ needs Java 17 or newer; default-jre is older on some releases.
 	echo -n "Checking for Java 17+: "
 	java_major=$(java -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1)
@@ -126,48 +143,6 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	fi
 	sudo ln -sfn "$ZAP_DIR" /opt/zap
 	
-	# checking for wig
-	echo -n "Checking for wig: "
-	python3 -c "import wig.wig" &> /dev/null
-	if [ $? -ne 0 ]
-	then
-		echo "NOT FOUND"
-		echo -n "Installing wig: "
-		sudo git clone https://github.com/jekyc/wig &> /dev/null
-		cd wig
-		ERROR=$(sudo python3 setup.py install)
-		if [ $? -ne 0 ]
-		then
-			echo "FAILED"
-			echo ${ERROR}
-		fi
-			echo "DONE"
-			sudo rm -rf wig*
-		else
-			echo "FOUND"
-		fi
-		cd -
-
-	echo -n "Checking paramiko: "
-	cd "$launch_dir"/lib
-	if [ ! -d ./paramiko ]
-	then
-		echo "NOT FOUND"
-		echo -n "Installing paramiko dev: "
-		sudo git clone https://github.com/paramiko/paramiko &> /dev/null
-		cd "$launch_dir"/lib/paramiko
-		ERROR=$(sudo python3 setup.py install)
-		if [ $? -ne 0 ]
-		then
-			echo "FAILED"
-			echo ${ERROR}
-		fi
-			echo "DONE"
-	else
-		echo "FOUND"
-	fi
-	cd "$launch_dir"
-
 	echo -n "Checking testssl: "
 	cd "$launch_dir"/lib
 	if [ ! -d ./testssl.sh ] 
@@ -201,16 +176,7 @@ elif [ "$(uname -s)" == "Linux" ]; then
 		sudo mkdir output
 	fi
 
-	do_command sudo pip3 install python-nmap
-	do_command sudo pip3 install python-owasp-zap-v2.4
-	do_command sudo pip3 install paramiko
-	do_command sudo pip3 install beautifulsoup4
-	do_command sudo pip3 install lxml
-	do_command sudo pip3 install dicttoxml
-	do_command sudo pip3 install progressbar2
-	do_command sudo pip3 install pathlib
-	do_command sudo pip3 install bcrypt
-	do_command sudo pip3 install pynacl
+	install_python_deps
 
 	# Now to write out a temp file which will indicate that we ran the install script 
 	sudo touch ./var/adapt_installed
