@@ -143,43 +143,42 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	fi
 	sudo ln -sfn "$ZAP_DIR" /opt/zap
 	
+	# Everything below lives inside the user's checkout, so it is created as
+	# the user, not root; ADAPT runs as the user and must be able to write
+	# here. Earlier versions of this script used sudo, so hand any root-owned
+	# leftovers back to the user.
+	for path in output lib/testssl.sh var/SecLists lib/paramiko var/adapt_installed
+	do
+		if [ -e "$launch_dir/$path" ] && [ -n "$(find "$launch_dir/$path" ! -user "$(id -u)" -print -quit)" ]
+		then
+			do_command sudo chown -R "$(id -u):$(id -g)" "$launch_dir/$path"
+		fi
+	done
+
 	echo -n "Checking testssl: "
-	cd "$launch_dir"/lib
-	if [ ! -d ./testssl.sh ] 
+	if [ ! -d "$launch_dir"/lib/testssl.sh ]
 	then
 		echo "NOT FOUND"
-		echo "Installing testssl dev: "
-		sudo git clone https://github.com/drwetter/testssl.sh &> /dev/null
-		echo "DONE"
+		do_command git clone --depth 1 https://github.com/drwetter/testssl.sh "$launch_dir"/lib/testssl.sh
 	else
 		echo "FOUND"
 	fi
-	cd "$launch_dir"
 
 	echo -n "Checking for SecLists: "
-	cd "$launch_dir"/var
-	if [ ! -d ./SecLists ] 
+	if [ ! -d "$launch_dir"/var/SecLists ]
 	then
-		echo "NOT FOUND"
-		echo -n "Installing SecLists: "
-		sudo git clone https://github.com/danielmiessler/SecLists.git
-		echo "DONE"
+		echo "NOT FOUND (downloading, this can take a few minutes)"
+		do_command git clone --depth 1 https://github.com/danielmiessler/SecLists.git "$launch_dir"/var/SecLists
 	else
 		echo "FOUND"
 	fi
-	cd "$launch_dir"
-	
 
-# Make output directory if it does not exist
-	if [ ! -d output ]
-	then
-		sudo mkdir output
-	fi
+	mkdir -p "$launch_dir"/output
 
 	install_python_deps
 
-	# Now to write out a temp file which will indicate that we ran the install script 
-	sudo touch ./var/adapt_installed
+	# Now to write out a temp file which will indicate that we ran the install script
+	touch "$launch_dir"/var/adapt_installed
 
 	echo "ADAPT install: FINISHED"
 else
