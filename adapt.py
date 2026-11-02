@@ -270,13 +270,13 @@ def main():
 		sys.exit(1)
 	if(command_line_args.output != None):
 		args["adapt_general"]["output_file"] = command_line_args.output
-		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.output, supported_file_formats)
+		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.output, ["json", "xml"])
+		# --output replaces the file, even if adapt.config sets append = on
+		args["adapt_general"]["append"] = False
 	if(command_line_args.append != None):
 		args["adapt_general"]["output_file"] = command_line_args.append
-		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.append, supported_file_formats)
-		if(args["adapt_general"]["output_format"] == "xml"):
-			print("--append only supports json output files, not xml.")
-			sys.exit(1)
+		# get_results() can only append to JSON; XML would be overwritten
+		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.append, ["json"])
 		args["adapt_general"]["append"] = True
 
 	if(command_line_args.conf != None):
