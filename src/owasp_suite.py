@@ -203,31 +203,59 @@ class owasp_suite():
 				r = self.zap.send_request(req)
 				html = str(r['responseBody'])
 			except Exception as e:
-				r = requests.get(url)
-				html = r.text
+				html = requests.get(url).text
 			if (html):
 				soup = BeautifulSoup(html,'html.parser')
 				comments = soup.findAll(text=lambda text:isinstance(text, Comment))
 				comment_list = []
 				for comment in comments:
-					str1 = str(comment)
-					comment_list.append(str1)
-					c = { "method":"GET", "url":url, "resp":r.text, "request":"GET "+url, "data":comment_list }
-					res.append(c)
+					comment_list.append(str(comment))
+				if comment_list:
+					res.append({ "method":"GET", "url":url, "resp":html, "request":"GET "+url, "data":comment_list })
 		return res
 
 	def generate_comment_reports_by_msgs(self):
 		report_list = []
-		for msg in self.zap.spider_messages():
-			req = HTTPRequest.read_from_zap_message( msg )
-			if (self.zapReqHeader is None):
-				if (msg['requestHeader'] != None):
-					self.zapReqHeader = msg['requestHeader']
-					self.zapReqBody = msg['requestBody']
+		try:
+			messages = self.zap.spider_messages()
+		except Exception as e:
+			# spider not run (no spider id) or ZAP error: nothing to report from ZAP
+			self.printer.aprint("config_002: could not get spider messages: "+str(e), 1)
+			return report_list
 
-			comments = self.find_comments_in_html( str(msg['responseBody']) )
-			if(comments):
-				report_list.append(create_report("config_002", "html comment - ZAP", severity="low", owasp_association="6", path=req.write_url(), request=req.write(), misc="\n".join(comments)))
+		# The same comment (copyright banners, framework markers, ...) often appears on
+		# many pages. Report each distinct comment once, on the first URL it was seen,
+		# and list the other URLs in misc.
+		seen = {}
+		for msg in messages:
+			try:
+				req = HTTPRequest.read_from_zap_message( msg )
+				if (self.zapReqHeader is None):
+					if (msg['requestHeader'] != None):
+						self.zapReqHeader = msg['requestHeader']
+						self.zapReqBody = msg['requestBody']
+				comments = self.find_comments_in_html( str(msg['responseBody']) )
+				url = req.write_url()
+				request = req.write()
+			except Exception as e:
+				self.printer.aprint("config_002: skipping unparsable message: "+str(e), 1)
+				continue
+			for comment in comments:
+				key = str(comment).strip()
+				if (not key):
+					continue
+				if (key in seen):
+					if (url not in seen[key]["urls"]):
+						seen[key]["urls"].append(url)
+				else:
+					seen[key] = {"urls":[url], "request":request}
+
+		for key, info in seen.items():
+			misc = [key]
+			if (len(info["urls"]) > 1):
+				misc.append("Also found on: "+", ".join(info["urls"][1:]))
+			report_list.append(create_report("config_002", "html comment - ZAP", severity="low", owasp_association="6", path=info["urls"][0], request=info["request"], misc=misc))
+		return report_list
 
 	def config_002(self):
 		report_list = []
@@ -242,11 +270,12 @@ class owasp_suite():
 
 		# comments in nmap urls
 		if (self.nmap_crawl_size != None):
-			p = self.__sub_setup("nmap", "--script", "http-errors", "–script-args", "httpspider.maxpagecount="+self.nmap_crawl_size, self.stripped_target)
+			p = self.__sub_setup("nmap", "--script", "http-errors", "--script-args", "httpspider.maxpagecount="+self.nmap_crawl_size, self.stripped_target)
 		else:
 			p = self.__sub_setup("nmap", "--script", "http-errors", self.stripped_target)
 
 		ignore_nmap = False
+		nmap_results = ""
 		try:
 			(out, err) = p.communicate(None, timeout=90)
 			regular = out.decode("utf-8", "replace")
