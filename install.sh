@@ -25,7 +25,8 @@ echo "This script should no longer be run as root"
 exit 1
 fi
 
-launch_dir=$(pwd)
+# The ADAPT checkout this script lives in, wherever it is run from.
+launch_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # To upgrade ZAP, change this version and re-run the installer.
 ZAP_VERSION=2.17.0
@@ -48,18 +49,25 @@ function do_command {
 }
 
 if [ "$1" == "clean" ]; then
-	echo "Cleaning..."
-	cd "$launch_dir"/output
-	rm *
-	cd "$launch_dir"
-	cd "$launch_dir"/static_data
-	rm -rf SecLists
-	cd "$launch_dir"
-	cd "$launch_dir"/tools
-	rm -rf "$launch_dir"/lib/paramiko
-	rm -rf "$launch_dir"/lib/testssl.sh
-	cd "$launch_dir"
-	
+	# Remove everything this script put inside the checkout (system packages
+	# and /opt/ZAP_* are left alone), plus the reports in output/.
+	if [ ! -f "$launch_dir/adapt.py" ]
+	then
+		echo "Refusing to clean: $launch_dir does not look like the ADAPT directory"
+		exit 1
+	fi
+	echo "Cleaning $launch_dir..."
+	for path in var/SecLists lib/testssl.sh lib/paramiko .venv var/adapt_installed
+	do
+		if [ -e "$launch_dir/$path" ]
+		then
+			do_command rm -rf "$launch_dir/$path"
+		fi
+	done
+	if [ -d "$launch_dir/output" ]
+	then
+		do_command find "$launch_dir/output" -mindepth 1 -delete
+	fi
 	exit 0
 fi
 
