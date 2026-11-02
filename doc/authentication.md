@@ -10,4 +10,4 @@ See the file: login_format.py for specific details regarding expected inputs/out
 
 ## Return value notes
 
-`service_auth` must return `rtt` as a float in **milliseconds** (e.g. `(time.time() - start) * 1000`). ADAPT's username-enumeration timing check (`ident_004`) compares these values between valid and invalid usernames, so a value in seconds would make the comparison meaningless.
+`service_auth` must return `rtt` as a float in **milliseconds** (e.g. `(time.perf_counter() - start) * 1000`; use `perf_counter`, not the wall clock, which can jump). ADAPT's username-enumeration timing check (`ident_004`) compares these values between valid and invalid usernames, so a value in seconds would make the comparison meaningless.

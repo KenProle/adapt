@@ -290,8 +290,14 @@ class owasp_suite():
 		badpwd_msgs = []
 		badun_msgs = []
 		for i in range(0,reps):
-			badpwd_msgs.append(self.zap.test_login(good_uname, bad_pass))
-			badun_msgs.append(self.zap.test_login(bad_uname, bad_pass))
+			# Alternate which login goes first, so effects of request order
+			# (connection reuse, caching) don't show up as a timing difference
+			if(i % 2 == 0):
+				badpwd_msgs.append(self.zap.test_login(good_uname, bad_pass))
+				badun_msgs.append(self.zap.test_login(bad_uname, bad_pass))
+			else:
+				badun_msgs.append(self.zap.test_login(bad_uname, bad_pass))
+				badpwd_msgs.append(self.zap.test_login(good_uname, bad_pass))
 			#badpwd_msgs.append( self.zapper.test_login( bad_passwd_data, "Bad Password" ) )
 			#badun_msgs.append( self.zapper.test_login( bad_uname_data, "Bad Username" ))
 
@@ -337,8 +343,12 @@ class owasp_suite():
 		badun_rtts =  [ float(msg['rtt']) for msg in badun_msgs ]
 		avg_badun = sum( badun_rtts ) / len( badun_rtts )
 		res = stats.ttest_ind( badpwd_rtts, badun_rtts, equal_var=False )
-		if( res.pvalue < 0.05 ):
-			reports.append( create_report( 
+		# Require a difference big enough to matter as well as a significant
+		# one: with millisecond precision, tiny systematic differences can be
+		# "significant" without saying anything about the username.
+		min_diff_ms = max( 5.0, 0.1 * min( avg_badpwd, avg_badun ) )
+		if( res.pvalue < 0.05 and abs( avg_badpwd - avg_badun ) >= min_diff_ms ):
+			reports.append( create_report(
 			'ident_004',
 			basic_description="Timing difference observed between valid and invalid usernames",
 			severity='low',
@@ -348,7 +358,8 @@ class owasp_suite():
 			cwe=521,
 			owasp_association="2",
 			misc=[
-				res._asdict(),
+				# plain floats: scipy's result object is not JSON serialisable
+				{ "statistic": float( res.statistic ), "pvalue": float( res.pvalue ), "df": float( res.df ) },
 				"{} v/i attempts with average rtt of {:.1f} ms".format( len( badpwd_rtts), avg_badpwd ),
 				"{} i/i attempts with average rtt of {:.1f} ms".format( len( badun_rtts), avg_badun )] ) )
 			
