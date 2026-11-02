@@ -156,6 +156,9 @@ class owasp_suite():
 
 
 	def info_002(self):
+		# wig's HTMLStripper breaks on newer Pythons (issue #8); patch it first
+		from wig_compat import patch_wig
+		patch_wig()
 		w = wig(
 			url=self.stripped_target,
 			run_all=True,
