@@ -592,18 +592,25 @@ class owasp_suite():
 			self.printer.aprint(note, 1)
 			return [create_report("crypst_001", note), create_report("crypst_002", note)]
 
-		if(testssl_results["scanResult"] == []):
-			return []
-		elif(testssl_results["scanTime"] == "Scan interrupted"):
-			return []
+		# newer testssl.sh versions put per-run info before the host result,
+		# so find the entry that holds the actual host findings
+		host_result = None
+		for entry in testssl_results.get("scanResult", []):
+			if(isinstance(entry, dict) and "protocols" in entry):
+				host_result = entry
+				break
+		if(testssl_results.get("scanTime") == "Scan interrupted" or host_result is None):
+			note = "testssl.sh did not return results for "+testssl_target+" (scan interrupted or target unreachable); TLS configuration was not tested"
+			self.printer.aprint(note, 1)
+			return [create_report("crypst_001", note), create_report("crypst_002", note)]
 
-		blocks = ["grease", "ciphers", "pfs", "serverPreferences", "serverDefaults", "headerResponse", "cipherTests", "browserSimulations"]		
+		blocks = ["grease", "ciphers", "pfs", "fs", "serverPreferences", "serverDefaults", "headerResponse", "cipherTests", "browserSimulations"]		
 		
 		padding_oracle_vulns = ["freak", "robot", "lucky13", "logjam", "logjam-common_primes", "poodle"]
 
 		warning = "none"
 		# check protocols 
-		for i in testssl_results["scanResult"][0]["protocols"]:
+		for i in host_result["protocols"]:
 			warning = "none" 
 			if(i["severity"] == "LOW"):
 				warning = "low"
@@ -615,7 +622,7 @@ class owasp_suite():
 				warning = "high"
 			ret.append(create_report("crypst_001", i["id"]+" is "+i["finding"], severity=warning, owasp_association="6", cwe=327))
 
-		for i in testssl_results["scanResult"][0]["vulnerabilities"]:
+		for i in host_result.get("vulnerabilities", []):
 			warning = "none"
 			padding_oracle = "crypst_001"
 			try:
@@ -638,7 +645,7 @@ class owasp_suite():
 			ret.append(create_report(padding_oracle, i["id"].lower()+" : "+i["finding"], severity=warning, cwe=cwe_id, owasp_association="6"))
 		
 		for name in blocks:
-			for i in testssl_results["scanResult"][0][name]:
+			for i in host_result.get(name, []):
 				if(i["severity"] == "INFO" or i["severity"] == "OK"):
 					ret.append(create_report("crypst_001", i["id"], severity="none", misc=[i["finding"]]))
 				else:
