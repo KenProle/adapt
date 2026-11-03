@@ -181,6 +181,7 @@ class AdaptZap():
 					# waiting won't help, so stop with the real reason.
 					raise Exception("ZAP is running on {}:{} but its API refused the request: HTTP {} {}".format(self.host, self.port, e.code, e.reason))
 				# other statuses (e.g. 5xx while starting): keep waiting
+				e.close()
 			except (urllib.error.URLError, ConnectionError, TimeoutError, socket.timeout):
 				pass   # not listening yet
 			elapsed = time.monotonic() - start
