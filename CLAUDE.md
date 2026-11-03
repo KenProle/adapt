@@ -52,6 +52,8 @@ A new test needs all of: a method on `owasp_suite` named after the test id, an e
 
 Every PR gets an independent code review (`/code-review high <PR#>`) and a security review (`/security-review`) before it is merged, run by a fresh reviewer (a new session or agent) rather than the session or agent that wrote the change. For each finding, either fix it or record in the PR why it is accepted; accepting a finding needs the repo owner's agreement, not just the author's. Re-review after fixing whenever a fix touches one of the security-sensitive areas below. This applies to agent-written and human-written PRs alike, and to doc-only PRs (the security review can be brief there). The rule lives here, so it binds Claude sessions; GitHub branch protection on `master` would be needed to enforce it for merges made in the GitHub UI.
 
+Merge with `gh pr merge <N> --squash`, which is the only merge method enabled on GitHub. Each PR lands on `master` as one commit titled with the PR title and described by the PR body, so keep the title in the form "Short summary (#issue)" and update the description when review fixes change the PR. To bring a PR branch up to date with `master`, merge `master` into the branch instead of rebasing, since force-pushing published branches is avoided.
+
 Treat as security-sensitive and review closely:
 - `install.sh` (runs sudo), and the code in `adapt.py` that runs it automatically or re-execs into `./.venv`.
 - Anything that runs a subprocess or builds a shell command: the ZAP launch (`shell=True`), nmap, testssl.sh.
