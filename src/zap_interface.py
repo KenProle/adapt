@@ -200,15 +200,36 @@ class AdaptZap():
 		# API key this way keeps it off the command line, where any local user
 		# could read it with ps. mkstemp creates the file readable by us only.
 		fd, path = tempfile.mkstemp(prefix="adapt-zap-", suffix=".properties")
-		# Java properties format: \uXXXX-escape everything but ASCII letters and
-		# digits, so backslashes, '#', '=' or spaces in a configured key survive
-		escaped = "".join(c if (c.isascii() and c.isalnum()) else "\\u{:04x}".format(ord(c)) for c in self.api_key)
+		# Java properties format: \uXXXX-escape (UTF-16 units) everything but ASCII
+		# letters and digits, so backslashes, '#', '=' or spaces in a configured key survive
+		escaped = ""
+		for c in self.api_key:
+			if(c.isascii() and c.isalnum()):
+				escaped += c
+			else:
+				units = c.encode("utf-16-be")
+				escaped += "".join("\\u{:02x}{:02x}".format(units[i], units[i+1]) for i in range(0, len(units), 2))
 		with os.fdopen(fd, "w", encoding="ascii") as f:
 			f.write("api.key="+escaped+"\n")
 		return path
 
+	def __protect_zap_home(self):
+		# ZAP saves the API key in <dir>/config.xml and the scanned traffic
+		# (cookies, credentials) under <dir>/db, readable by every local user with
+		# the usual umask, so keep its -dir private to us.
+		opts = list(self.zap_opts)
+		if("-dir" not in opts or opts.index("-dir")+1 >= len(opts)):
+			return
+		zap_home = opts[opts.index("-dir")+1]
+		try:
+			os.makedirs(zap_home, mode=0o700, exist_ok=True)
+			os.chmod(zap_home, 0o700)
+		except OSError as e:
+			print("ADAPT: WARNING: could not make ZAP's directory {} private ({}); other local users may be able to read ZAP's API key and session data.".format(zap_home, e), file=sys.stderr)
+
 	def open(self):
 		self.printer.aprint("open zap daemon "+str(self.zap_path))
+		self.__protect_zap_home()
 		key_file = self.__write_api_key_file()
 		try:
 			# An argument list, not a shell command, so nothing in the path or
