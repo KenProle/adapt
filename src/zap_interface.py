@@ -18,7 +18,7 @@
 #  limitations under the License.
 #
 
-import os, sys, shlex, time, datetime, logging, subprocess, json, html, urllib, urllib.error, urllib.parse, urllib.request, re, importlib, socket
+import os, sys, stat, contextlib, tempfile, time, datetime, logging, subprocess, json, html, urllib, urllib.error, urllib.parse, urllib.request, re, importlib, socket
 #from httpparser.httprequest import HTTPRequest
 from zapv2 import ZAPv2
 from aprint import aprint
@@ -109,9 +109,9 @@ class AdaptZap():
 
 	def gen_random_api_key(self):
 		from string import ascii_letters,digits
-		from random import choice 
+		from secrets import choice
 		char_pool = ascii_letters + digits
-		return ''.join(choice(char_pool)for i in range(20))
+		return ''.join(choice(char_pool) for i in range(32))
 
 	def __sess_val(self):
 		self.session_counter+=1
@@ -195,29 +195,84 @@ class AdaptZap():
 				next_report += 15
 			time.sleep(1)
 
+	def __write_api_key_file(self, directory=None):
+		# ZAP applies the key=value lines of a -configfile at startup. Passing the
+		# API key this way keeps it off the command line, where any local user
+		# could read it with ps. mkstemp creates the file readable by us only; it
+		# goes in ZAP's private -dir when there is one, so even if ADAPT is killed
+		# before removing it, it isn't left in a shared /tmp.
+		# Java properties format: \uXXXX-escape (UTF-16 units) everything but ASCII
+		# letters and digits, so backslashes, '#', '=' or spaces in a configured key survive
+		escaped = ""
+		for c in self.api_key:
+			if(c.isascii() and c.isalnum()):
+				escaped += c
+			else:
+				units = c.encode("utf-16-be")
+				escaped += "".join("\\u{:02x}{:02x}".format(units[i], units[i+1]) for i in range(0, len(units), 2))
+		# Create the file only once the content is ready, so a failure above leaves nothing behind
+		fd, path = tempfile.mkstemp(prefix="adapt-zap-", suffix=".properties", dir=directory)
+		try:
+			with os.fdopen(fd, "w", encoding="ascii") as f:
+				f.write("api.key="+escaped+"\n")
+		except BaseException:
+			os.remove(path)
+			raise
+		return path
+
+	def __protect_zap_home(self):
+		# ZAP saves the API key in <dir>/config.xml (and logs it in <dir>/zap.log),
+		# and the scanned traffic (cookies, credentials) under <dir>/db, all readable
+		# by every local user with the usual umask. Keep its -dir private to us, and
+		# don't start ZAP if that isn't possible (e.g. on a /mnt/c drive in WSL, or
+		# a directory owned by someone else, which could also hold a planted config).
+		opts = list(self.zap_opts)
+		if("-dir" not in opts or opts.index("-dir")+1 >= len(opts)):
+			return None
+		zap_home = opts[opts.index("-dir")+1]
+		try:
+			os.makedirs(zap_home, mode=0o700, exist_ok=True)
+			os.chmod(zap_home, 0o700)
+			st = os.stat(zap_home)
+		except OSError as e:
+			raise Exception("Could not make ZAP's directory {} private: {}".format(zap_home, e))
+		if(not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or (st.st_mode & 0o077) != 0):
+			raise Exception("ZAP's directory {} must be a directory owned by you with mode 0700 (it is uid {}, mode {:o}), "
+				"or other local users could read ZAP's API key and session data. Run ADAPT from a Linux filesystem you own "
+				"(not e.g. /mnt/c in WSL).".format(zap_home, st.st_uid, stat.S_IMODE(st.st_mode)))
+		return zap_home
+
 	def open(self):
 		self.printer.aprint("open zap daemon "+str(self.zap_path))
-		zap_execve = "exec {} {} -config api.key={} -port {}".format(
-			self.zap_path,
-			' '.join(self.zap_opts),
-			shlex.quote(self.api_key),   # the command runs through a shell
-			self.port
-		)
-		self.p = subprocess.Popen(zap_execve, stdout=open(os.devnull, "w"), shell=True)
-		self.printer.aprint("Waiting for zap startup... ")
-
-		# Poll ZAP's API until it answers, instead of sleeping a fixed time:
-		# stop early if the ZAP process exits, and give up after a timeout.
-		version_url = "{}:{}/JSON/core/view/version/?{}".format(self.host, self.port, urllib.parse.urlencode({"apikey": self.api_key}))
-		no_proxy = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-		start = time.monotonic()
+		zap_home = self.__protect_zap_home()
+		key_file = None
 		try:
+			key_file = self.__write_api_key_file(zap_home)
+			# An argument list, not a shell command, so nothing in the path or
+			# opts is interpreted by a shell
+			zap_cmd = [self.zap_path] + list(self.zap_opts) + ["-configfile", key_file, "-port", str(self.port)]
+			try:
+				self.p = subprocess.Popen(zap_cmd, stdout=subprocess.DEVNULL)
+			except OSError as e:
+				raise Exception("Could not start ZAP ({}). Check that zap_general.path in var/configuration.json points to an executable zap.sh.".format(e))
+			self.printer.aprint("Waiting for zap startup... ")
+
+			# Poll ZAP's API until it answers, instead of sleeping a fixed time:
+			# stop early if the ZAP process exits, and give up after a timeout.
+			version_url = "{}:{}/JSON/core/view/version/?{}".format(self.host, self.port, urllib.parse.urlencode({"apikey": self.api_key}))
+			no_proxy = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+			start = time.monotonic()
 			version = self.__wait_for_api(version_url, no_proxy, start)
 		except BaseException:
-			# Any failure while waiting (including Ctrl-C or an unexpected
+			# Any failure while starting (including Ctrl-C or an unexpected
 			# reply) stops the ZAP we launched instead of leaving it running.
 			self.close_zap_process()
 			raise
+		finally:
+			# ZAP has read the key file by the time its API answers (or we have given up)
+			if(key_file is not None):
+				with contextlib.suppress(FileNotFoundError):
+					os.remove(key_file)
 
 		self.printer.aprint("ZAP {} ready after {:.0f}s".format(version, time.monotonic() - start))
 		self.already_opened = True
