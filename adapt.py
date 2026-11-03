@@ -51,7 +51,7 @@ sys.path.insert(0, os.getcwd()+"/bin")
 sys.path.insert(0, os.getcwd()+"/lib")
 sys.path.insert(0, os.getcwd()+"/etc")
 
-import json, argparse, threading, paramiko, adapt_config_parser, base64, hashlib, shlex
+import json, argparse, threading, paramiko, adapt_config_parser, base64, hashlib, shlex, traceback
 from zap_interface import AdaptZap
 from owasp_suite import owasp_suite
 from adapt_analysis import adapt_analysis
@@ -200,15 +200,18 @@ class _AcceptUnknownHostKey(paramiko.MissingHostKeyPolicy):
 
 def _local_log_name(log_path):
 	# Local file name in ./tmp/ for a downloaded log: the remote file's base name
-	name = log_path.rstrip("/").split("/")[-1]
+	name = log_path.split("/")[-1]
 	if(name in ("", ".", "..") or "." not in name):
 		return None
 	return name
 
-def ssh_capture_dmesg_logs(args):
-	printer.aprint("Getting ssh logs")
+def ssh_connect(args, attempts=3):
+	# Returns a connected (SSHClient, SFTPClient). The server's host key is
+	# checked before any credentials are sent.
 	hostname = args["ssh_config"]["hostname"]
-	port = args["ssh_config"]["port"]
+	# int: paramiko only looks up a bare "host" known_hosts entry when port == 22
+	# as an int; the string "22" makes it look for "[host]:22" instead
+	port = int(args["ssh_config"]["port"])
 	username = args["ssh_config"]["username"]
 	password = args["ssh_config"]["password"]
 	known_hosts = args["ssh_config"].get("known_hosts")
@@ -224,53 +227,74 @@ def ssh_capture_dmesg_logs(args):
 		if(not os.path.isfile(path)):
 			raise Exception("SSH known_hosts file not found: "+path)
 		client.load_host_keys(path)
+	pinned = args["ssh_config"].get("accepted_host_key")
+	if(pinned is not None):
+		# accept_unknown_host_key: the key accepted by the pre-scan check must
+		# still be the server's key at the end of the scan
+		client.get_host_keys().add(hostname if port == 22 else "[{}]:{}".format(hostname, port), pinned.get_name(), pinned)
 	if(accept_unknown):
 		client.set_missing_host_key_policy(_AcceptUnknownHostKey())
 	else:
 		client.set_missing_host_key_policy(_RejectUnknownHostKey(hostname, port))
 
-	connection_attempts = 1
-	connection_success = False
-
 	ssh_connection_timeout = 30
 	exception_reason = None
 
-	# now tries to connect 3 times before fully failing. 
-	# increases banner, auth and general timeout after each failure
-	while(connection_attempts < 4):
-		printer.aprint("Attempt "+str(connection_attempts)+"/3 ... ")
+	# Network errors are retried, with longer banner, auth and general timeouts
+	# each time. Host key and password errors are not: retrying can't help.
+	for attempt in range(1, attempts+1):
+		printer.aprint("Attempt {}/{} ... ".format(attempt, attempts))
 		try:
 			client.connect(
 				hostname=hostname,
 				username=username,
 				password=password,
 				port=port,
+				# only the configured password, not local keys or an agent, which
+				# would use up the server's MaxAuthTries before the password is tried
+				look_for_keys=False,
+				allow_agent=False,
 				banner_timeout=ssh_connection_timeout,
 				auth_timeout=ssh_connection_timeout,
 				timeout=ssh_connection_timeout
 			)
 			ftp_client = client.open_sftp()
-			connection_success = True
 			printer.aprint("Connected!")
-			break
+			return client, ftp_client
 		except UnknownHostKey as e:
 			client.close()
 			raise Exception("Not connecting: "+str(e))
 		except paramiko.BadHostKeyException as e:
-			# Retrying can't help, and this may be an attack: stop at once
+			# This may be an attack: stop at once
 			client.close()
 			raise Exception("Not connecting: the SSH host key of {} does NOT match the one in known_hosts (got {}, expected {}). "
 				"This could be a machine-in-the-middle attack, or the server's key was changed; check with the server's admin.".format(
 				e.hostname, _host_key_fingerprint(e.key), _host_key_fingerprint(e.expected_key)))
+		except paramiko.AuthenticationException as e:
+			if(str(e) == "Authentication timeout." and attempt < attempts):
+				# a slow server, not a rejected password: retry with a longer timeout
+				printer.aprint("Attempt {} failed: {}".format(attempt, e))
+				client.close()
+				exception_reason = e
+				time.sleep(30)
+				ssh_connection_timeout+=60
+				continue
+			# Retrying a wrong password could lock the account
+			client.close()
+			raise Exception("SSH login to {} as {} failed: {}".format(hostname, username, e))
 		except Exception as e:
-			printer.aprint("Attempt "+str(connection_attempts)+" failed: "+str(e))
-			time.sleep(30)
-			ssh_connection_timeout+=60
+			printer.aprint("Attempt {} failed: {}".format(attempt, e))
+			client.close()
 			exception_reason = e
-		connection_attempts += 1
+			if(attempt < attempts):
+				time.sleep(30)
+				ssh_connection_timeout+=60
 
-	if(not connection_success):
-		raise Exception("Cannot connect to ssh server: "+str(exception_reason))
+	raise Exception("Cannot connect to ssh server: "+str(exception_reason))
+
+def ssh_capture_dmesg_logs(args):
+	printer.aprint("Getting ssh logs")
+	client, ftp_client = ssh_connect(args)
 
 	printer.aprint("Getting files...")
 	fetched = set()
@@ -283,7 +307,7 @@ def ssh_capture_dmesg_logs(args):
 			log_path = "/var/log/php-scripts.log"
 		filename = _local_log_name(log_path)
 		if(filename is None):
-			printer.aprint("SSH: skipping log path without a file name with an extension: "+log_path, 1)
+			print("ADAPT: SSH log path skipped (it must end in a file name with an extension): "+log_path, file=sys.stderr)
 			continue
 		if(filename in fetched):
 			print("ADAPT: SSH log {} skipped: another log path also ends in {}".format(log_path, filename), file=sys.stderr)
@@ -387,6 +411,20 @@ def main():
 
 	printer.aprint("... Done")
 
+	if(args["ssh_config"]["turned_on"]):
+		# Check the SSH connection now (host key, known_hosts file, password)
+		# rather than finding a problem after a scan that may take hours
+		try:
+			client, ftp_client = ssh_connect(args, attempts=1)
+			if(args["ssh_config"].get("accept_unknown_host_key", False)):
+				args["ssh_config"]["accepted_host_key"] = client.get_transport().get_remote_server_key()
+			ftp_client.close()
+			client.close()
+		except Exception as e:
+			print("ADAPT: SSH check failed, not starting the scan: "+str(e), file=sys.stderr)
+			print("Fix the SSH settings in adapt.config, or set ssh_get_logs = off to scan without server logs.", file=sys.stderr)
+			sys.exit(1)
+
 	printer.aprint("Test bed setup starting...")
 	pentester = PenTester(args)
 	pentester.run()
@@ -398,6 +436,7 @@ def main():
 			except Exception as e:
 				# Keep the scan results: write the report without the server logs
 				print("ADAPT: server logs not collected over SSH: "+str(e), file=sys.stderr)
+				printer.aprint(traceback.format_exc(), 2)
 	
 		analysis = adapt_analysis( pentester.zap_results, pentester.owasp_results,args=args)
 		analysis.get_results()
