@@ -26,6 +26,9 @@ try:
 	from urllib.parse import urlparse
 	from difflib import SequenceMatcher
 	from wig.wig import wig
+	# wig's HTMLStripper breaks on newer Pythons (issue #8)
+	from wig_compat import patch_wig
+	patch_wig()
 	from bs4 import BeautifulSoup
 	from bs4 import Comment 
 	from httpparser.httprequest import HTTPRequest
@@ -212,31 +215,66 @@ class owasp_suite():
 				r = self.zap.send_request(req)
 				html = str(r['responseBody'])
 			except Exception as e:
-				r = requests.get(url)
-				html = r.text
+				try:
+					# Target may use a self-signed certificate; we only read the page
+					html = requests.get(url, timeout=15, verify=False).text
+				except Exception as e2:
+					self.printer.aprint("config_002: could not fetch "+url+": "+str(e2), 1)
+					continue
 			if (html):
-				soup = BeautifulSoup(html,'html.parser')
-				comments = soup.findAll(text=lambda text:isinstance(text, Comment))
-				comment_list = []
-				for comment in comments:
-					str1 = str(comment)
-					comment_list.append(str1)
-					c = { "method":"GET", "url":url, "resp":r.text, "request":"GET "+url, "data":comment_list }
-					res.append(c)
+				comment_list = [str(c) for c in self.find_comments_in_html(html) if str(c).strip()]
+				if comment_list:
+					res.append({ "method":"GET", "url":url, "resp":html, "request":"GET "+url, "data":comment_list })
 		return res
 
 	def generate_comment_reports_by_msgs(self):
 		report_list = []
-		for msg in self.zap.spider_messages():
-			req = HTTPRequest.read_from_zap_message( msg )
-			if (self.zapReqHeader is None):
-				if (msg['requestHeader'] != None):
-					self.zapReqHeader = msg['requestHeader']
-					self.zapReqBody = msg['requestBody']
+		try:
+			messages = self.zap.spider_messages()
+		except Exception as e:
+			# spider not run (no spider id) or ZAP error: nothing to report from ZAP
+			self.printer.aprint("config_002: could not get spider messages: "+str(e), 1)
+			return report_list
 
-			comments = self.find_comments_in_html( str(msg['responseBody']) )
-			if(comments):
-				report_list.append(create_report("config_002", "html comment - ZAP", severity="low", owasp_association="6", path=req.write_url(), request=req.write(), misc="\n".join(comments)))
+		# The same comment (copyright banners, framework markers, ...) often appears on
+		# many pages. Report each distinct comment once, on the first URL it was seen,
+		# and list the other URLs in misc.
+		seen = {}
+		for msg in messages:
+			try:
+				# Only HTML and XML (incl. SVG) can hold markup comments; parsing
+				# images or scripts as HTML turns binary data and regex
+				# fragments into fake comments.
+				content_type = re.search(r"(?im)^content-type:\s*([^;\r\n]*)", str(msg.get('responseHeader', "")))
+				if (content_type and not any(t in content_type.group(1).lower() for t in ("html", "xml"))):
+					continue
+				req = HTTPRequest.read_from_zap_message( msg )
+				if (self.zapReqHeader is None):
+					if (msg['requestHeader'] != None):
+						self.zapReqHeader = msg['requestHeader']
+						self.zapReqBody = msg['requestBody']
+				comments = self.find_comments_in_html( str(msg['responseBody']) )
+				url = req.write_url()
+				request = req.write()
+			except Exception as e:
+				self.printer.aprint("config_002: skipping unparsable message: "+str(e), 1)
+				continue
+			for comment in comments:
+				key = str(comment).strip()
+				if (not key):
+					continue
+				if (key in seen):
+					if (url not in seen[key]["urls"]):
+						seen[key]["urls"].append(url)
+				else:
+					seen[key] = {"urls":[url], "request":request}
+
+		for key, info in seen.items():
+			misc = [key]
+			if (len(info["urls"]) > 1):
+				misc.append("Also found on: "+", ".join(info["urls"][1:]))
+			report_list.append(create_report("config_002", "html comment - ZAP", severity="low", owasp_association="6", path=info["urls"][0], request=info["request"], misc=misc))
+		return report_list
 
 	def config_002(self):
 		report_list = []
@@ -251,11 +289,12 @@ class owasp_suite():
 
 		# comments in nmap urls
 		if (self.nmap_crawl_size != None):
-			p = self.__sub_setup("nmap", "--script", "http-errors", "–script-args", "httpspider.maxpagecount="+self.nmap_crawl_size, self.stripped_target)
+			p = self.__sub_setup("nmap", "--script", "http-errors", "--script-args", "httpspider.maxpagecount="+self.nmap_crawl_size, self.stripped_target)
 		else:
 			p = self.__sub_setup("nmap", "--script", "http-errors", self.stripped_target)
 
 		ignore_nmap = False
+		nmap_results = ""
 		try:
 			(out, err) = p.communicate(None, timeout=90)
 			regular = out.decode("utf-8", "replace")
@@ -299,8 +338,14 @@ class owasp_suite():
 		badpwd_msgs = []
 		badun_msgs = []
 		for i in range(0,reps):
-			badpwd_msgs.append(self.zap.test_login(good_uname, bad_pass))
-			badun_msgs.append(self.zap.test_login(bad_uname, bad_pass))
+			# Alternate which login goes first, so effects of request order
+			# (warm-up, caching) don't show up as a timing difference
+			if(i % 2 == 0):
+				badpwd_msgs.append(self.zap.test_login(good_uname, bad_pass))
+				badun_msgs.append(self.zap.test_login(bad_uname, bad_pass))
+			else:
+				badun_msgs.append(self.zap.test_login(bad_uname, bad_pass))
+				badpwd_msgs.append(self.zap.test_login(good_uname, bad_pass))
 			#badpwd_msgs.append( self.zapper.test_login( bad_passwd_data, "Bad Password" ) )
 			#badun_msgs.append( self.zapper.test_login( bad_uname_data, "Bad Username" ))
 
@@ -340,14 +385,23 @@ class owasp_suite():
 			reports.append( create_report( 'ident_004', basic_description="Response difference between valid and invalid usernames on login page", severity='low', request='', confidence=1.0, path=self.unstripped_target ) )
 
 		# rtt analysis, same general methodology
-		badpwd_rtts = [ int(msg['rtt']) for msg in badpwd_msgs ]
+		badpwd_rtts = [ float(msg['rtt']) for msg in badpwd_msgs ]
 		avg_badpwd = sum( badpwd_rtts ) / len( badpwd_rtts )
 
-		badun_rtts =  [ int(msg['rtt']) for msg in badun_msgs ]
+		badun_rtts =  [ float(msg['rtt']) for msg in badun_msgs ]
 		avg_badun = sum( badun_rtts ) / len( badun_rtts )
 		res = stats.ttest_ind( badpwd_rtts, badun_rtts, equal_var=False )
-		if( res.pvalue < 0.05 ):
-			reports.append( create_report( 
+		if( max( badpwd_rtts + badun_rtts ) < 1.0 ):
+			# Almost certainly an auth module returning seconds, not milliseconds
+			print("ADAPT: ident_004: every login rtt is under 1 ms; check that the auth module returns rtt in milliseconds", file=sys.stderr)
+		# Require a difference big enough to matter as well as a significant
+		# one: with millisecond precision, tiny systematic differences can be
+		# "significant" without saying anything about the username. A fixed
+		# floor, because the server-side work that gives a username away adds
+		# a fixed amount of time however slow the network is.
+		min_diff_ms = 5.0
+		if( res.pvalue < 0.05 and abs( avg_badpwd - avg_badun ) >= min_diff_ms ):
+			reports.append( create_report(
 			'ident_004',
 			basic_description="Timing difference observed between valid and invalid usernames",
 			severity='low',
@@ -357,9 +411,11 @@ class owasp_suite():
 			cwe=521,
 			owasp_association="2",
 			misc=[
-				res._asdict(),
-				"{} v/i attempts with average rtt of {}".format( len( badpwd_rtts), avg_badpwd ),
-				"{} i/i attempts with average rtt of {}".format( len( badun_rtts), avg_badun )] ) )
+				# plain floats: scipy's result object is not JSON serialisable
+				# (df only exists from scipy 1.11)
+				{ "statistic": float( res.statistic ), "pvalue": float( res.pvalue ), "df": float( res.df ) if hasattr( res, "df" ) else None },
+				"{} v/i attempts with average rtt of {:.1f} ms".format( len( badpwd_rtts), avg_badpwd ),
+				"{} i/i attempts with average rtt of {:.1f} ms".format( len( badun_rtts), avg_badun )] ) )
 			
 		return reports
 		

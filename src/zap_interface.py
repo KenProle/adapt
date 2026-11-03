@@ -18,13 +18,16 @@
 #  limitations under the License.
 #
 
-import os, sys, time, datetime, logging, subprocess, json, html, urllib, re, importlib
+import os, sys, shlex, time, datetime, logging, subprocess, json, html, urllib, urllib.error, urllib.parse, urllib.request, re, importlib, socket
 #from httpparser.httprequest import HTTPRequest
 from zapv2 import ZAPv2
 from aprint import aprint
 import progressbar
 
 class AdaptZap():
+	# Seconds to wait for ZAP's API to come up before giving up
+	ZAP_STARTUP_TIMEOUT = 180
+
 	def __init__(self, args):
 		self.args = args
 		self.printer = aprint(self.args["adapt_general"]["verbose"], "zap_interface")
@@ -137,6 +140,12 @@ class AdaptZap():
 	def __del__(self):
 		self.close()
 
+	def close_zap_process(self):
+		# Used when startup fails: stop the ZAP we launched, whatever close_on_finish says
+		if(self.p is not None and self.p.poll() is None):
+			self.p.kill()
+			self.p.wait()
+
 	def close(self):
 		self.already_connected = False
 		self.already_opened = False
@@ -152,26 +161,65 @@ class AdaptZap():
 			self.zap.context.exclude_from_context(context_name, "{}{}".format(self.context,e))
 		return contextid
 
+	def __wait_for_api(self, version_url, opener, start):
+		next_report = 15
+		launcher_exited = False
+		while(True):
+			exit_code = self.p.poll()
+			if(exit_code is not None and not launcher_exited):
+				if(exit_code != 0):
+					raise Exception("ZAP exited during startup (exit code {}). Check that {} runs on its own and that Java 17+ is installed.".format(exit_code, self.zap_path))
+				# A launcher that starts ZAP in the background and exits 0:
+				# keep polling the API instead of treating it as a failure.
+				launcher_exited = True
+				msg = "the ZAP launch command exited (code 0); assuming it started ZAP in the background. ADAPT can't stop that ZAP process itself."
+				print("ADAPT: "+msg, file=sys.stderr)
+			try:
+				with opener.open(version_url, timeout=2) as resp:
+					return json.loads(resp.read().decode("utf-8"))["version"]
+			except urllib.error.HTTPError as e:
+				if(e.code in (400, 401, 403)):
+					# ZAP is up but refused the request (e.g. API key rejected):
+					# waiting won't help, so stop with the real reason.
+					raise Exception("ZAP is running on {}:{} but its API refused the request: HTTP {} {}".format(self.host, self.port, e.code, e.reason))
+				# other statuses (e.g. 5xx while starting): keep waiting
+				e.close()
+			except (urllib.error.URLError, ConnectionError, TimeoutError, socket.timeout):
+				pass   # not listening yet
+			elapsed = time.monotonic() - start
+			if(elapsed > self.ZAP_STARTUP_TIMEOUT):
+				extra = " The launch command had exited with code 0." if launcher_exited else ""
+				raise Exception("ZAP did not answer on {}:{} within {} seconds; giving up.{}".format(self.host, self.port, self.ZAP_STARTUP_TIMEOUT, extra))
+			if(elapsed > next_report):
+				self.printer.aprint("Still waiting for ZAP ({:.0f}s)...".format(elapsed))
+				next_report += 15
+			time.sleep(1)
+
 	def open(self):
 		self.printer.aprint("open zap daemon "+str(self.zap_path))
 		zap_execve = "exec {} {} -config api.key={} -port {}".format(
 			self.zap_path,
 			' '.join(self.zap_opts),
-			self.api_key,
+			shlex.quote(self.api_key),   # the command runs through a shell
 			self.port
 		)
 		self.p = subprocess.Popen(zap_execve, stdout=open(os.devnull, "w"), shell=True)
 		self.printer.aprint("Waiting for zap startup... ")
-		bar = progressbar.ProgressBar(maxval=60, widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
-		if(self.args["adapt_general"]["verbose"]):bar.start()
-		for i in range(60):
-			if(self.args["adapt_general"]["verbose"]):bar.update(i)
-			time.sleep(1)
-		if(i < 59):
-			self.printer.aprint("CANNOT LOAD ZAP. PLEASE CHECK FOR ZAP UPDATES.", c=2)
-			sys.exit(1)
-		if(self.args["adapt_general"]["verbose"]):bar.finish()
-		self.printer.aprint("DONE")
+
+		# Poll ZAP's API until it answers, instead of sleeping a fixed time:
+		# stop early if the ZAP process exits, and give up after a timeout.
+		version_url = "{}:{}/JSON/core/view/version/?{}".format(self.host, self.port, urllib.parse.urlencode({"apikey": self.api_key}))
+		no_proxy = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+		start = time.monotonic()
+		try:
+			version = self.__wait_for_api(version_url, no_proxy, start)
+		except BaseException:
+			# Any failure while waiting (including Ctrl-C or an unexpected
+			# reply) stops the ZAP we launched instead of leaving it running.
+			self.close_zap_process()
+			raise
+
+		self.printer.aprint("ZAP {} ready after {:.0f}s".format(version, time.monotonic() - start))
 		self.already_opened = True
 		return True
 
