@@ -478,7 +478,7 @@ class owasp_suite():
 				if(200 <= status < 300):
 					# A 2xx alone doesn't prove a working tunnel (some frameworks
 					# answer every method with 200), hence the lower confidence.
-					report_list.append(create_report("inpval_003", "Server answered CONNECT with HTTP {}; it may act as an open proxy/tunnel (not verified).".format(status), severity="medium", request=req, cwe=441, confidence=0.5))
+					report_list.append(create_report("inpval_003", "Server answered CONNECT with HTTP {}; it may act as an open proxy/tunnel (not verified).".format(status), severity="medium", request=req, cwe=441, owasp_association="6", confidence=0.5))
 				continue
 			if(status == 200):
 				report_list.append(create_report("inpval_003", "Valid response from potentially vulnerable verbs.", severity="low", request=req, confidence=1.0))
@@ -513,6 +513,8 @@ class owasp_suite():
 		u = urlparse(self.unstripped_target)
 		https = (u.scheme == "https")
 		host = u.hostname
+		if(not host):
+			raise Exception("target {} has no host name (use a full URL such as http://host:port/)".format(self.unstripped_target))
 		port = u.port or (443 if https else 80)
 		authority = "{}:{}".format("["+host+"]" if ":" in host else host, port)   # bracket IPv6 literals
 		req = "CONNECT {0} HTTP/1.1\r\nHost: {0}\r\n\r\n".format(authority)
@@ -528,9 +530,19 @@ class owasp_suite():
 			sock.sendall(req.encode("ascii"))
 			data = b""
 			# Read the response head; a server that accepts CONNECT keeps the
-			# tunnel open, so never wait for the connection to close.
+			# tunnel open, so never wait for the connection to close. An
+			# overall deadline stops a server that drips bytes from stalling
+			# the test; on timeout, use whatever status line already arrived.
+			deadline = time.monotonic() + timeout
 			while(b"\r\n\r\n" not in data and len(data) < max_bytes):
-				chunk = sock.recv(4096)
+				remaining = deadline - time.monotonic()
+				if(remaining <= 0):
+					break
+				sock.settimeout(remaining)
+				try:
+					chunk = sock.recv(4096)
+				except socket.timeout:
+					break
 				if(not chunk):
 					break
 				data += chunk
@@ -548,8 +560,10 @@ class owasp_suite():
 	def config_006(self):
 
 		if(not self.args["zap_general"]["spider_turned_on"]):
-			self.printer.aprint("config_006 skipped: it needs the ZAP spider (spider_scan = on)", 1)
-			return []
+			# Report the skip visibly, so it can't look like a clean run
+			msg = "config_006 skipped: it needs the ZAP spider (spider_scan = on)"
+			print("ADAPT: "+msg, file=sys.stderr)
+			return [create_report("config_006", "SKIPPED: "+msg, error=True)]
 
 		report_list = []
 
