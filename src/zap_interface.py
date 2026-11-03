@@ -18,7 +18,7 @@
 #  limitations under the License.
 #
 
-import os, time, datetime, logging, subprocess, json, html, urllib, urllib.error, urllib.parse, urllib.request, re, importlib, socket
+import os, sys, shlex, time, datetime, logging, subprocess, json, html, urllib, urllib.error, urllib.parse, urllib.request, re, importlib, socket
 #from httpparser.httprequest import HTTPRequest
 from zapv2 import ZAPv2
 from aprint import aprint
@@ -159,22 +159,7 @@ class AdaptZap():
 			self.zap.context.exclude_from_context(context_name, "{}{}".format(self.context,e))
 		return contextid
 
-	def open(self):
-		self.printer.aprint("open zap daemon "+str(self.zap_path))
-		zap_execve = "exec {} {} -config api.key={} -port {}".format(
-			self.zap_path,
-			' '.join(self.zap_opts),
-			self.api_key,
-			self.port
-		)
-		self.p = subprocess.Popen(zap_execve, stdout=open(os.devnull, "w"), shell=True)
-		self.printer.aprint("Waiting for zap startup... ")
-
-		# Poll ZAP's API until it answers, instead of sleeping a fixed time:
-		# stop early if the ZAP process exits, and give up after a timeout.
-		version_url = "{}:{}/JSON/core/view/version/?{}".format(self.host, self.port, urllib.parse.urlencode({"apikey": self.api_key}))
-		no_proxy = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-		start = time.time()
+	def __wait_for_api(self, version_url, opener, start):
 		next_report = 15
 		launcher_exited = False
 		while(True):
@@ -185,26 +170,53 @@ class AdaptZap():
 				# A launcher that starts ZAP in the background and exits 0:
 				# keep polling the API instead of treating it as a failure.
 				launcher_exited = True
+				msg = "the ZAP launch command exited (code 0); assuming it started ZAP in the background. ADAPT can't stop that ZAP process itself."
+				print("ADAPT: "+msg, file=sys.stderr)
 			try:
-				with no_proxy.open(version_url, timeout=2) as resp:
-					version = json.loads(resp.read().decode("utf-8"))["version"]
-				break
+				with opener.open(version_url, timeout=2) as resp:
+					return json.loads(resp.read().decode("utf-8"))["version"]
 			except urllib.error.HTTPError as e:
-				# ZAP is up but refused the request (e.g. API key rejected):
-				# waiting won't help, so stop with the real reason.
-				self.close_zap_process()
-				raise Exception("ZAP is running on {}:{} but its API refused the request: HTTP {} {}".format(self.host, self.port, e.code, e.reason))
+				if(e.code in (400, 401, 403)):
+					# ZAP is up but refused the request (e.g. API key rejected):
+					# waiting won't help, so stop with the real reason.
+					raise Exception("ZAP is running on {}:{} but its API refused the request: HTTP {} {}".format(self.host, self.port, e.code, e.reason))
+				# other statuses (e.g. 5xx while starting): keep waiting
 			except (urllib.error.URLError, ConnectionError, TimeoutError, socket.timeout):
 				pass   # not listening yet
-			if(time.time() - start > self.ZAP_STARTUP_TIMEOUT):
-				self.close_zap_process()
-				raise Exception("ZAP did not answer on {}:{} within {} seconds; giving up.".format(self.host, self.port, self.ZAP_STARTUP_TIMEOUT))
-			if(time.time() - start > next_report):
-				self.printer.aprint("Still waiting for ZAP ({:.0f}s)...".format(time.time() - start))
+			elapsed = time.monotonic() - start
+			if(elapsed > self.ZAP_STARTUP_TIMEOUT):
+				extra = " The launch command had exited with code 0." if launcher_exited else ""
+				raise Exception("ZAP did not answer on {}:{} within {} seconds; giving up.{}".format(self.host, self.port, self.ZAP_STARTUP_TIMEOUT, extra))
+			if(elapsed > next_report):
+				self.printer.aprint("Still waiting for ZAP ({:.0f}s)...".format(elapsed))
 				next_report += 15
 			time.sleep(1)
 
-		self.printer.aprint("ZAP {} ready after {:.0f}s".format(version, time.time() - start))
+	def open(self):
+		self.printer.aprint("open zap daemon "+str(self.zap_path))
+		zap_execve = "exec {} {} -config api.key={} -port {}".format(
+			self.zap_path,
+			' '.join(self.zap_opts),
+			shlex.quote(self.api_key),   # the command runs through a shell
+			self.port
+		)
+		self.p = subprocess.Popen(zap_execve, stdout=open(os.devnull, "w"), shell=True)
+		self.printer.aprint("Waiting for zap startup... ")
+
+		# Poll ZAP's API until it answers, instead of sleeping a fixed time:
+		# stop early if the ZAP process exits, and give up after a timeout.
+		version_url = "{}:{}/JSON/core/view/version/?{}".format(self.host, self.port, urllib.parse.urlencode({"apikey": self.api_key}))
+		no_proxy = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+		start = time.monotonic()
+		try:
+			version = self.__wait_for_api(version_url, no_proxy, start)
+		except BaseException:
+			# Any failure while waiting (including Ctrl-C or an unexpected
+			# reply) stops the ZAP we launched instead of leaving it running.
+			self.close_zap_process()
+			raise
+
+		self.printer.aprint("ZAP {} ready after {:.0f}s".format(version, time.monotonic() - start))
 		self.already_opened = True
 		return True
 
