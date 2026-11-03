@@ -227,6 +227,11 @@ def ssh_connect(args, attempts=3):
 		if(not os.path.isfile(path)):
 			raise Exception("SSH known_hosts file not found: "+path)
 		client.load_host_keys(path)
+	pinned = args["ssh_config"].get("accepted_host_key")
+	if(pinned is not None):
+		# accept_unknown_host_key: the key accepted by the pre-scan check must
+		# still be the server's key at the end of the scan
+		client.get_host_keys().add(hostname if port == 22 else "[{}]:{}".format(hostname, port), pinned.get_name(), pinned)
 	if(accept_unknown):
 		client.set_missing_host_key_policy(_AcceptUnknownHostKey())
 	else:
@@ -245,6 +250,10 @@ def ssh_connect(args, attempts=3):
 				username=username,
 				password=password,
 				port=port,
+				# only the configured password, not local keys or an agent, which
+				# would use up the server's MaxAuthTries before the password is tried
+				look_for_keys=False,
+				allow_agent=False,
 				banner_timeout=ssh_connection_timeout,
 				auth_timeout=ssh_connection_timeout,
 				timeout=ssh_connection_timeout
@@ -262,6 +271,14 @@ def ssh_connect(args, attempts=3):
 				"This could be a machine-in-the-middle attack, or the server's key was changed; check with the server's admin.".format(
 				e.hostname, _host_key_fingerprint(e.key), _host_key_fingerprint(e.expected_key)))
 		except paramiko.AuthenticationException as e:
+			if(str(e) == "Authentication timeout." and attempt < attempts):
+				# a slow server, not a rejected password: retry with a longer timeout
+				printer.aprint("Attempt {} failed: {}".format(attempt, e))
+				client.close()
+				exception_reason = e
+				time.sleep(30)
+				ssh_connection_timeout+=60
+				continue
 			# Retrying a wrong password could lock the account
 			client.close()
 			raise Exception("SSH login to {} as {} failed: {}".format(hostname, username, e))
@@ -399,6 +416,8 @@ def main():
 		# rather than finding a problem after a scan that may take hours
 		try:
 			client, ftp_client = ssh_connect(args, attempts=1)
+			if(args["ssh_config"].get("accept_unknown_host_key", False)):
+				args["ssh_config"]["accepted_host_key"] = client.get_transport().get_remote_server_key()
 			ftp_client.close()
 			client.close()
 		except Exception as e:
