@@ -576,7 +576,10 @@ class owasp_suite():
 				stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 			try:
 				(out, err) = x.communicate(None, 1000)
-			except subprocess.TimeoutExpired:
+			except BaseException:
+				# Timeout, or Ctrl-C: testssl.sh runs in its own session, so
+				# the terminal's SIGINT doesn't reach it; stop the whole group
+				# rather than leave it scanning the target in the background.
 				os.killpg(x.pid, signal.SIGKILL)
 				x.communicate()
 				raise
@@ -600,7 +603,8 @@ class owasp_suite():
 
 		if(testssl_results is None):
 			hint = ""
-			if(any(t in failure for t in ("dig", "nslookup", "drill"))):
+			# testssl.sh's message when no DNS tool is installed
+			if(re.search(r'Neither "dig", "host"|\b(dig|drill|nslookup)\b.*not (present|found)', failure)):
 				hint = " Install dig/host (package bind9-dnsutils or dnsutils)."
 			return not_tested("testssl.sh failed against "+testssl_target+" ("+failure+"); TLS configuration was not tested."+hint)
 
