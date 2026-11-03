@@ -21,7 +21,7 @@
 try:
 	import re, subprocess, time, urllib.request, requests, random, copy, os
 	import scipy.stats as stats
-	import itertools, os, errno, json, socket, ssl, sys, traceback
+	import itertools, os, errno, json, signal, socket, ssl, sys, traceback
 	from aprint import aprint
 	from urllib.parse import urlparse
 	from difflib import SequenceMatcher
@@ -694,32 +694,93 @@ class owasp_suite():
 		return reports
 	def crypst_001(self):
 		ret = []
-		filename = os.getcwd()+"/tmp/ssl_test.json"
-		x = self.__sub_setup(os.getcwd()+self.args["adapt_general"]["testssl_loc"], "-oJ",filename,  self.dns_target)
-		(out, err) = x.communicate(None, 1000)
 
-		with open(filename) as datafile:
-			testssl_results = json.load(datafile)
-		datafile.close()
+		def not_tested(note):
+			# Recorded as error entries, which adapt_analysis always reports
+			# (whatever the risk level or detail), so a skipped or failed TLS
+			# test can't look like a clean result or a "pass".
+			print("ADAPT: crypst_001/crypst_002 not tested: "+note, file=sys.stderr)
+			enabled = self.args["owasp_general"]["tests_to_run"]
+			return [create_report(name, "NOT TESTED: "+note, error=True) for name in ("crypst_001", "crypst_002") if enabled.get(name)]
 
+		parsed = urlparse(self.unstripped_target)
+		if(parsed.scheme.lower() != "https"):
+			return not_tested("Target is not an https:// URL ({}), so no TLS configuration was tested (testssl.sh skipped)".format(self.unstripped_target))
 		try:
-			os.remove(filename)
-		except OSError as e:
-			if(e.errno != errno.ENOENT):
+			port = parsed.port or 443
+		except ValueError:
+			return not_tested("Target {} has an invalid port, so no TLS configuration was tested".format(self.unstripped_target))
+		host = parsed.hostname
+		if(not host):
+			return not_tested("Could not find a host name in target {}, so no TLS configuration was tested".format(self.unstripped_target))
+		if(":" in host):
+			host = "["+host+"]"   # IPv6 literal
+		testssl_target = host+":"+str(port)
+
+		filename = os.getcwd()+"/tmp/ssl_test.json"
+		failure = None
+		testssl_results = None
+		try:
+			# testssl.sh refuses to overwrite an existing output file
+			if(os.path.exists(filename)):
+				os.remove(filename)
+			# Own session, so a timeout can kill testssl.sh and its openssl children
+			x = subprocess.Popen([os.getcwd()+self.args["adapt_general"]["testssl_loc"], "-oJ", filename, testssl_target],
+				stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+			try:
+				(out, err) = x.communicate(None, 1000)
+			except BaseException:
+				# Timeout, or Ctrl-C: testssl.sh runs in its own session, so
+				# the terminal's SIGINT doesn't reach it; stop the whole group
+				# rather than leave it scanning the target in the background.
+				try:
+					os.killpg(x.pid, signal.SIGKILL)
+				except ProcessLookupError:
+					pass   # already gone; re-raise the original exception, not this
+				x.communicate()
 				raise
+			try:
+				with open(filename) as datafile:
+					testssl_results = json.load(datafile)
+				if(not isinstance(testssl_results, dict)):
+					raise ValueError("unexpected testssl.sh output")
+			except Exception as e:
+				# Show why testssl.sh failed, not just that its output was unreadable
+				tail = err.decode("utf-8", "replace").strip()[-300:] or out.decode("utf-8", "replace").strip()[-300:]
+				raise Exception("{}; testssl.sh exit code {}: {}".format(e, x.returncode, tail))
+		except Exception as e:
+			failure = str(e)
+			testssl_results = None
+		finally:
+			try:
+				os.remove(filename)
+			except OSError:
+				pass
 
-		if(testssl_results["scanResult"] == []):
-			return []
-		elif(testssl_results["scanTime"] == "Scan interrupted"):
-			return []
+		if(testssl_results is None):
+			hint = ""
+			# testssl.sh's message when no DNS tool is installed
+			if(re.search(r'Neither "dig", "host"|\b(dig|drill|nslookup)\b.*not (present|found)', failure)):
+				hint = " Install dig/host (package bind9-dnsutils or dnsutils)."
+			return not_tested("testssl.sh failed against "+testssl_target+" ("+failure+"); TLS configuration was not tested."+hint)
 
-		blocks = ["grease", "ciphers", "pfs", "serverPreferences", "serverDefaults", "headerResponse", "cipherTests", "browserSimulations"]		
+		# newer testssl.sh versions put per-run info before the host result,
+		# so find the entry that holds the actual host findings
+		host_result = None
+		for entry in testssl_results.get("scanResult", []):
+			if(isinstance(entry, dict) and "protocols" in entry):
+				host_result = entry
+				break
+		if(testssl_results.get("scanTime") == "Scan interrupted" or host_result is None):
+			return not_tested("testssl.sh did not return results for "+testssl_target+" (scan interrupted or target unreachable); TLS configuration was not tested")
+
+		blocks = ["grease", "ciphers", "pfs", "fs", "serverPreferences", "serverDefaults", "headerResponse", "cipherTests", "browserSimulations"]		
 		
 		padding_oracle_vulns = ["freak", "robot", "lucky13", "logjam", "logjam-common_primes", "poodle"]
 
 		warning = "none"
 		# check protocols 
-		for i in testssl_results["scanResult"][0]["protocols"]:
+		for i in host_result["protocols"]:
 			warning = "none" 
 			if(i["severity"] == "LOW"):
 				warning = "low"
@@ -731,7 +792,7 @@ class owasp_suite():
 				warning = "high"
 			ret.append(create_report("crypst_001", i["id"]+" is "+i["finding"], severity=warning, owasp_association="6", cwe=327))
 
-		for i in testssl_results["scanResult"][0]["vulnerabilities"]:
+		for i in host_result.get("vulnerabilities", []):
 			warning = "none"
 			padding_oracle = "crypst_001"
 			try:
@@ -754,7 +815,7 @@ class owasp_suite():
 			ret.append(create_report(padding_oracle, i["id"].lower()+" : "+i["finding"], severity=warning, cwe=cwe_id, owasp_association="6"))
 		
 		for name in blocks:
-			for i in testssl_results["scanResult"][0][name]:
+			for i in host_result.get(name, []):
 				if(i["severity"] == "INFO" or i["severity"] == "OK"):
 					ret.append(create_report("crypst_001", i["id"], severity="none", misc=[i["finding"]]))
 				else:
