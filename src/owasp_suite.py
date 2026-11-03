@@ -26,6 +26,9 @@ try:
 	from urllib.parse import urlparse
 	from difflib import SequenceMatcher
 	from wig.wig import wig
+	# wig's HTMLStripper breaks on newer Pythons (issue #8)
+	from wig_compat import patch_wig
+	patch_wig()
 	from bs4 import BeautifulSoup
 	from bs4 import Comment 
 	from httpparser.httprequest import HTTPRequest
