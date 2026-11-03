@@ -580,7 +580,10 @@ class owasp_suite():
 				# Timeout, or Ctrl-C: testssl.sh runs in its own session, so
 				# the terminal's SIGINT doesn't reach it; stop the whole group
 				# rather than leave it scanning the target in the background.
-				os.killpg(x.pid, signal.SIGKILL)
+				try:
+					os.killpg(x.pid, signal.SIGKILL)
+				except ProcessLookupError:
+					pass   # already gone; re-raise the original exception, not this
 				x.communicate()
 				raise
 			try:
