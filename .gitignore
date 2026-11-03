@@ -8,5 +8,4 @@ zap/
 SecLists/
 paramiko/
 testssl.sh
-.claude/settings.local.json
 .venv/
