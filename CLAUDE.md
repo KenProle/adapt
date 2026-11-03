@@ -50,9 +50,14 @@ A new test needs all of: a method on `owasp_suite` named after the test id, an e
 
 ## Before merging a pull request
 
-Every PR gets an independent code review (`/code-review`) and a security review (`/security-review`) before it is merged, run by a fresh reviewer rather than the session or agent that wrote the change. Fix each finding or record in the PR why it was accepted, and re-review if the fixes are substantial. This applies to agent-written and human-written PRs alike, and to doc-only PRs (the security review can be brief there).
+Every PR gets an independent code review (`/code-review high <PR#>`) and a security review (`/security-review`) before it is merged, run by a fresh reviewer (a new session or agent) rather than the session or agent that wrote the change. For each finding, either fix it or record in the PR why it is accepted; accepting a finding needs the repo owner's agreement, not just the author's. Re-review after fixing whenever a fix touches one of the security-sensitive areas below. This applies to agent-written and human-written PRs alike, and to doc-only PRs (the security review can be brief there). The rule lives here, so it binds Claude sessions; GitHub branch protection on `master` would be needed to enforce it for merges made in the GitHub UI.
 
-Treat as security-sensitive and review closely: `install.sh` (runs sudo), anything that runs a subprocess or builds a shell command (ZAP launch, nmap, testssl.sh), file paths built from config or target input, raw sockets and requests sent to the target, and auth modules that handle credentials.
+Treat as security-sensitive and review closely:
+- `install.sh` (runs sudo), and the code in `adapt.py` that runs it automatically or re-execs into `./.venv`.
+- Anything that runs a subprocess or builds a shell command: the ZAP launch (`shell=True`), nmap, testssl.sh.
+- File paths built from config or target input, including the local names of logs downloaded over SSH.
+- Network code that talks to the target: the raw-socket CONNECT in `inpval_003`, `requests`/`urllib` calls, wig, and ZAP API calls.
+- Credentials and code loading: auth modules, how `zap_interface` imports the module named by `auth_module` in config, `//stdin` prompts, and the SSH/SFTP log retrieval in `adapt.py` (SSH password, host-key policy).
 
 ## Gotchas
 
