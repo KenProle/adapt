@@ -51,7 +51,7 @@ sys.path.insert(0, os.getcwd()+"/bin")
 sys.path.insert(0, os.getcwd()+"/lib")
 sys.path.insert(0, os.getcwd()+"/etc")
 
-import json, argparse, threading, paramiko, adapt_config_parser
+import json, argparse, threading, paramiko, adapt_config_parser, base64, hashlib, shlex
 from zap_interface import AdaptZap
 from owasp_suite import owasp_suite
 from adapt_analysis import adapt_analysis
@@ -171,19 +171,63 @@ def __format_from_filename(filename, supported):
 		__unsupported_value("output file format", ext, supported)
 	return ext
 
+def _host_key_fingerprint(key):
+	# Same form as `ssh-keygen -lf`: SHA256:<unpadded base64>
+	return "SHA256:"+base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode("ascii").rstrip("=")
+
+class UnknownHostKey(paramiko.SSHException):
+	pass
+
+class _RejectUnknownHostKey(paramiko.MissingHostKeyPolicy):
+	# Default: refuse a server whose key isn't in known_hosts, before any
+	# credentials are sent, and say how to add the key.
+	def __init__(self, host, port):
+		self.host = host
+		self.port = port
+	def missing_host_key(self, client, hostname, key):
+		raise UnknownHostKey(
+			"the SSH host key of {} is not in known_hosts ({} {}). ADAPT won't send the SSH password to an unverified server. "
+			"Check the fingerprint with the server's admin, then add the key, e.g. "
+			"`ssh-keyscan -p {} {} >> ~/.ssh/known_hosts`, or set accept_unknown_host_key = on in adapt.config.".format(
+				hostname, key.get_name(), _host_key_fingerprint(key), shlex.quote(str(self.port)), shlex.quote(self.host)))
+
+class _AcceptUnknownHostKey(paramiko.MissingHostKeyPolicy):
+	# Opt-in (accept_unknown_host_key = on): accept an unknown key for this run
+	# only, without saving it, and say which key was trusted.
+	def missing_host_key(self, client, hostname, key):
+		print("ADAPT: WARNING: accepting unverified SSH host key for {}: {} {}".format(
+			hostname, key.get_name(), _host_key_fingerprint(key)), file=sys.stderr)
+
+def _local_log_name(log_path):
+	# Local file name in ./tmp/ for a downloaded log: the remote file's base name
+	name = log_path.rstrip("/").split("/")[-1]
+	if(name in ("", ".", "..") or "." not in name):
+		return None
+	return name
+
 def ssh_capture_dmesg_logs(args):
 	printer.aprint("Getting ssh logs")
 	hostname = args["ssh_config"]["hostname"]
 	port = args["ssh_config"]["port"]
 	username = args["ssh_config"]["username"]
 	password = args["ssh_config"]["password"]
+	known_hosts = args["ssh_config"].get("known_hosts")
+	accept_unknown = args["ssh_config"].get("accept_unknown_host_key", False)
 
 	printer.aprint("Connecting...")
-	try:	
-		client = paramiko.SSHClient()
-		client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-	except Exception as e:
-		printer.aprint("ERROR: "+str(e), 2)
+	client = paramiko.SSHClient()
+	# Host keys from ~/.ssh/known_hosts, plus the configured file. A key that
+	# differs from a known one always fails (BadHostKeyException), whatever the policy.
+	client.load_system_host_keys()
+	if(known_hosts is not None):
+		path = os.path.expanduser(known_hosts)
+		if(not os.path.isfile(path)):
+			raise Exception("SSH known_hosts file not found: "+path)
+		client.load_host_keys(path)
+	if(accept_unknown):
+		client.set_missing_host_key_policy(_AcceptUnknownHostKey())
+	else:
+		client.set_missing_host_key_policy(_RejectUnknownHostKey(hostname, port))
 
 	connection_attempts = 1
 	connection_success = False
@@ -209,6 +253,15 @@ def ssh_capture_dmesg_logs(args):
 			connection_success = True
 			printer.aprint("Connected!")
 			break
+		except UnknownHostKey as e:
+			client.close()
+			raise Exception("Not connecting: "+str(e))
+		except paramiko.BadHostKeyException as e:
+			# Retrying can't help, and this may be an attack: stop at once
+			client.close()
+			raise Exception("Not connecting: the SSH host key of {} does NOT match the one in known_hosts (got {}, expected {}). "
+				"This could be a machine-in-the-middle attack, or the server's key was changed; check with the server's admin.".format(
+				e.hostname, _host_key_fingerprint(e.key), _host_key_fingerprint(e.expected_key)))
 		except Exception as e:
 			printer.aprint("Attempt "+str(connection_attempts)+" failed: "+str(e))
 			time.sleep(30)
@@ -220,21 +273,22 @@ def ssh_capture_dmesg_logs(args):
 		raise Exception("Cannot connect to ssh server: "+str(exception_reason))
 
 	printer.aprint("Getting files...")
+	fetched = set()
 	for i in args["ssh_config"]["log_paths"]:
-
-		filename = ""
 
 		log_path = i
 		if(log_path == "apache2"):
 			log_path = "/var/log/http-error.log"
-			filename = "http-error.log"
 		elif(log_path == "php"):
 			log_path = "/var/log/php-scripts.log"
-			filename = "php-scripts.log"
-		elif("." not in log_path.split("/")[-1]):
+		filename = _local_log_name(log_path)
+		if(filename is None):
+			printer.aprint("SSH: skipping log path without a file name with an extension: "+log_path, 1)
 			continue
-		else:
-			filename = log_path.split("/")[-1]
+		if(filename in fetched):
+			print("ADAPT: SSH log {} skipped: another log path also ends in {}".format(log_path, filename), file=sys.stderr)
+			continue
+		fetched.add(filename)
 
 		try:
 			ftp_client.get(log_path, "./tmp/"+filename)
@@ -339,7 +393,11 @@ def main():
 	printer.aprint("Test bed finished")
 	if( pentester.successful ):
 		if(args["ssh_config"]["turned_on"]):
-			ssh_capture_dmesg_logs(args)
+			try:
+				ssh_capture_dmesg_logs(args)
+			except Exception as e:
+				# Keep the scan results: write the report without the server logs
+				print("ADAPT: server logs not collected over SSH: "+str(e), file=sys.stderr)
 	
 		analysis = adapt_analysis( pentester.zap_results, pentester.owasp_results,args=args)
 		analysis.get_results()
