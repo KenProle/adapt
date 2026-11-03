@@ -66,6 +66,21 @@ SSH:
 	username : the username to use. Use //stdin to enter user via stdin. 
 	password : the password to use. Use //stdin to enter password via stdin. 
 
+	known_hosts : ADAPT only connects to a server whose host key is already known, so it never
+		sends the SSH password to an unverified server. Keys are read from ~/.ssh/known_hosts,
+		plus this file if it is not 'default'. To add a key, check its fingerprint with the
+		server's admin, then run e.g. `ssh-keyscan -p 22 myserver >> ~/.ssh/known_hosts`.
+		The host name must match the `hostname` setting exactly. paramiko ignores
+		`@revoked` and `@cert-authority` lines, so remove a revoked key's own entry too.
+
+	accept_unknown_host_key : 'on' accepts a server whose key is not known, for this run only
+		(the key is not saved, and its fingerprint is printed). Not recommended. A key that
+		differs from a known one is always refused. Default: off.
+
+	ADAPT checks the SSH connection (host key and login) before it starts scanning, and
+	stops if that fails. A wrong password is not retried. If the logs can't be collected at
+	the end of the scan, ADAPT says why and still writes the report, without the server logs.
+
 	keywords : Capture lines with these space separated keywords. If set to 'none', will default to [ERROR, error, WARNING, warning]
 
 	log_paths : The space separated list of complete file paths to the log files. 

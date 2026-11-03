@@ -127,6 +127,10 @@ def get_config_defaults(contents):
 	except:
 		config_error("SSH port is not an integer")
 	contents["ssh_config"]["password"] = ssh_op["password"]
+	# .get(): older adapt.config files don't have these; the safe default is strict checking
+	known_hosts = ssh_op.get("known_hosts", "default").strip()
+	contents["ssh_config"]["known_hosts"] = None if known_hosts.lower() in ("", "default", "none") else known_hosts
+	contents["ssh_config"]["accept_unknown_host_key"] = onf(ssh_op.get("accept_unknown_host_key", "off"))
 	contents["ssh_config"]["log_paths"] = ssh_op["log_paths"].split()
 	contents["ssh_config"]["read_direction"] = set_get(ssh_op["read_direction"], ["full", "bottom", "top"], "full")
 	try:
