@@ -18,7 +18,7 @@
 #  limitations under the License.
 #
 
-import os, sys, shlex, time, datetime, logging, subprocess, json, html, urllib, urllib.error, urllib.parse, urllib.request, re, importlib, socket
+import os, sys, tempfile, time, datetime, logging, subprocess, json, html, urllib, urllib.error, urllib.parse, urllib.request, re, importlib, socket
 #from httpparser.httprequest import HTTPRequest
 from zapv2 import ZAPv2
 from aprint import aprint
@@ -195,15 +195,29 @@ class AdaptZap():
 				next_report += 15
 			time.sleep(1)
 
+	def __write_api_key_file(self):
+		# ZAP applies the key=value lines of a -configfile at startup. Passing the
+		# API key this way keeps it off the command line, where any local user
+		# could read it with ps. mkstemp creates the file readable by us only.
+		fd, path = tempfile.mkstemp(prefix="adapt-zap-", suffix=".properties")
+		# Java properties format: \uXXXX-escape everything but ASCII letters and
+		# digits, so backslashes, '#', '=' or spaces in a configured key survive
+		escaped = "".join(c if (c.isascii() and c.isalnum()) else "\\u{:04x}".format(ord(c)) for c in self.api_key)
+		with os.fdopen(fd, "w", encoding="ascii") as f:
+			f.write("api.key="+escaped+"\n")
+		return path
+
 	def open(self):
 		self.printer.aprint("open zap daemon "+str(self.zap_path))
-		zap_execve = "exec {} {} -config api.key={} -port {}".format(
-			self.zap_path,
-			' '.join(self.zap_opts),
-			shlex.quote(self.api_key),   # the command runs through a shell
-			self.port
-		)
-		self.p = subprocess.Popen(zap_execve, stdout=open(os.devnull, "w"), shell=True)
+		key_file = self.__write_api_key_file()
+		try:
+			# An argument list, not a shell command, so nothing in the path or
+			# opts is interpreted by a shell
+			zap_cmd = [self.zap_path] + list(self.zap_opts) + ["-configfile", key_file, "-port", str(self.port)]
+			self.p = subprocess.Popen(zap_cmd, stdout=subprocess.DEVNULL)
+		except BaseException:
+			os.remove(key_file)
+			raise
 		self.printer.aprint("Waiting for zap startup... ")
 
 		# Poll ZAP's API until it answers, instead of sleeping a fixed time:
@@ -218,6 +232,9 @@ class AdaptZap():
 			# reply) stops the ZAP we launched instead of leaving it running.
 			self.close_zap_process()
 			raise
+		finally:
+			# ZAP has read it by the time its API answers (or we have given up)
+			os.remove(key_file)
 
 		self.printer.aprint("ZAP {} ready after {:.0f}s".format(version, time.monotonic() - start))
 		self.already_opened = True
