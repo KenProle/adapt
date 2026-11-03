@@ -700,7 +700,8 @@ class owasp_suite():
 			# (whatever the risk level or detail), so a skipped or failed TLS
 			# test can't look like a clean result or a "pass".
 			print("ADAPT: crypst_001/crypst_002 not tested: "+note, file=sys.stderr)
-			return [create_report(name, "NOT TESTED: "+note, error=True) for name in ("crypst_001", "crypst_002")]
+			enabled = self.args["owasp_general"]["tests_to_run"]
+			return [create_report(name, "NOT TESTED: "+note, error=True) for name in ("crypst_001", "crypst_002") if enabled.get(name)]
 
 		parsed = urlparse(self.unstripped_target)
 		if(parsed.scheme.lower() != "https"):
