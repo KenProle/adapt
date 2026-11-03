@@ -696,10 +696,11 @@ class owasp_suite():
 		ret = []
 
 		def not_tested(note):
-			# Severity low (not "none") so the note survives risk filtering and
-			# a skipped or failed TLS test can't look like a clean result.
-			self.printer.aprint(note, 1)
-			return [create_report(name, note, severity="low", owasp_association="6") for name in ("crypst_001", "crypst_002")]
+			# Recorded as error entries, which adapt_analysis always reports
+			# (whatever the risk level or detail), so a skipped or failed TLS
+			# test can't look like a clean result or a "pass".
+			print("ADAPT: crypst_001/crypst_002 not tested: "+note, file=sys.stderr)
+			return [create_report(name, "NOT TESTED: "+note, error=True) for name in ("crypst_001", "crypst_002")]
 
 		parsed = urlparse(self.unstripped_target)
 		if(parsed.scheme.lower() != "https"):
