@@ -25,18 +25,26 @@ The installer:
 * shallow-clones testssl.sh into `lib/` and SecLists into `var/`
 * creates a Python venv at `./.venv` from `requirements.txt`
 
-Everything in the checkout is owned by your user. Re-running `./install.sh` is safe,
-and fixes root-owned files left by older installs. A full install takes about
-2 minutes plus the SecLists download.
+The installer creates its files as your user. Re-running `./install.sh` is safe,
+and hands `output/`, `lib/testssl.sh`, `var/SecLists` and `var/adapt_installed`
+back to you if an older install left them owned by root. A full install takes
+about 2 minutes plus the SecLists download.
+
+If you cloned on Windows before `.gitattributes` was added, your checkout may
+still have CRLF line endings: re-clone, or run
+`git rm --cached -r . && git reset --hard` (this discards uncommitted changes).
 
 `./install.sh clean` removes what the installer put in the checkout (not system
 packages or `/opt/ZAP_*`) and empties `output/`.
 
 ## Running
 
-Run from the repo root:
+First set `target` and `context` in `adapt.config` to your application (for
+example both `http://localhost:8080/myapp`). `context` decides what ZAP spiders
+and scans, and `--target` on the command line does not change it, so keep the
+two in step. Then, from the repo root:
 
-    python3 adapt.py --target http://localhost
+    python3 adapt.py
 
 `adapt.py` re-runs itself under `.venv` automatically, so there is no need to
 activate the venv or pip install anything. ADAPT checks at startup that `./output`
@@ -58,28 +66,39 @@ directory) for details. Authentication modules shipped in the repo root:
 
       ip route | awk '/default/ {print $3}'
 
-  or set `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`
-  (then `wsl --shutdown`). The host must be used in both `target`/`context` in
-  `adapt.config` and the login URL in your auth script. `insecure_bank_login.py`
-  looks the Windows host up automatically and can be used as an example.
+  and use that host in both `target`/`context` in `adapt.config` and the login
+  URL in your auth script. `insecure_bank_login.py` looks this address up
+  automatically (as WSL's default gateway) and can be used as an example.
+* Or set `networkingMode=mirrored` under `[wsl2]` in `%UserProfile%\.wslconfig`
+  (then `wsl --shutdown`) and use `localhost` everywhere instead. In mirrored
+  mode the default gateway is your LAN router, not Windows, so the automatic
+  lookup in `insecure_bank_login.py` does not work; change its login URL to
+  `localhost`. Mirrored mode also makes services in WSL (including DVWA, below)
+  reachable from your network.
 
 ## DVWA
 
 For testing against a known vulnerable webapp, `lib/dvwa/` has scripts to install
 and run a docker container with the Damn Vulnerable Web App.
 
+DVWA is deliberately vulnerable: only run it on a machine and network you trust.
+It is published on port 80 on all interfaces.
+
 Make sure docker is installed and running, and the user is in the `docker` group.
-This is not automated, but the steps will probably look like
+Membership of `docker` is equivalent to root access on that machine. This is not
+automated, but the steps will probably look like
 
     sudo apt-get install docker.io
     sudo gpasswd -a ${USER} docker
 
-Log out and in again to apply the group change. Then:
+Log out and in again to apply the group change. Then, from inside `lib/dvwa`
+(the script calls `python3 ./setup_dvwa.py`, which needs the packages in ADAPT's
+venv):
 
     cd lib/dvwa
-    ./setup-dvwa.sh
+    PATH="$PWD/../../.venv/bin:$PATH" ./setup-dvwa.sh
 
-It must be run from inside `lib/dvwa` (it calls `python3 ./setup_dvwa.py`). Browse
-to `http://localhost` to check the site is up. The default login is
+Browse to `http://localhost` to check the site is up. The default login is
 admin/password; if you see 'database not configured', click the setup button
-manually. Then target it with ADAPT (using `login_format.py` as the auth module).
+manually. Then set `target` and `context` in `adapt.config` to `http://localhost`
+and use `login_format.py` as the auth module.
