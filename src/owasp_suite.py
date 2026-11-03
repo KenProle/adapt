@@ -459,6 +459,8 @@ class owasp_suite():
 					# ZAP's sendRequest API rejects CONNECT (it only knows
 					# CONNECT as the proxy tunnel handshake), so send it
 					# ourselves, in the authority form a real client uses.
+					# Limitation: this bypasses ZAP, so ZAP's upstream proxy
+					# settings don't apply and it isn't in ZAP's history.
 					req, resp = self.__raw_connect()
 				else:
 					req = "{} {}/ HTTP/1.0\r\n\r\n".format(m, self.unstripped_target)
@@ -474,7 +476,9 @@ class owasp_suite():
 			html = str(resp['responseBody'])
 			if(m == "CONNECT"):
 				if(200 <= status < 300):
-					report_list.append(create_report("inpval_003", "Server accepted a CONNECT request and may act as an open proxy/tunnel.", severity="medium", request=req, cwe=441, confidence=1.0))
+					# A 2xx alone doesn't prove a working tunnel (some frameworks
+					# answer every method with 200), hence the lower confidence.
+					report_list.append(create_report("inpval_003", "Server answered CONNECT with HTTP {}; it may act as an open proxy/tunnel (not verified).".format(status), severity="medium", request=req, cwe=441, confidence=0.5))
 				continue
 			if(status == 200):
 				report_list.append(create_report("inpval_003", "Valid response from potentially vulnerable verbs.", severity="low", request=req, confidence=1.0))
@@ -494,6 +498,13 @@ class owasp_suite():
 		if(errors):
 			desc += " ({} of {} methods could not be tested)".format(errors, len(methods))
 		report_list.append(create_report("inpval_003", desc, severity="none", request=self.unstripped_target, confidence=1.0, misc=results))
+		if(errors):
+			# The summary is severity "none", so it can be filtered out (or shown
+			# as "pass" at detail=low). Also record an error entry, which
+			# adapt_analysis always reports.
+			err = "{} of {} HTTP methods could not be tested".format(errors, len(methods))
+			print("ADAPT: inpval_003: "+err, file=sys.stderr)
+			report_list.append(create_report("inpval_003", "ERROR: inpval_003 incomplete: "+err, misc=[r for r in results if "ERROR" in r], error=True))
 		return report_list
 
 	def __raw_connect(self, timeout=10, max_bytes=65536):
@@ -503,7 +514,7 @@ class owasp_suite():
 		https = (u.scheme == "https")
 		host = u.hostname
 		port = u.port or (443 if https else 80)
-		authority = "{}:{}".format(host, port)
+		authority = "{}:{}".format("["+host+"]" if ":" in host else host, port)   # bracket IPv6 literals
 		req = "CONNECT {0} HTTP/1.1\r\nHost: {0}\r\n\r\n".format(authority)
 
 		sock = socket.create_connection((host, port), timeout=timeout)
@@ -523,17 +534,8 @@ class owasp_suite():
 				if(not chunk):
 					break
 				data += chunk
+			# Only the status line matters, so stop after the response head
 			head, _, body = data.partition(b"\r\n\r\n")
-			m = re.search(rb"\r\ncontent-length:\s*(\d+)", head, re.I)
-			want = min(int(m.group(1)), max_bytes) if m else 0
-			try:
-				while(len(body) < want):
-					chunk = sock.recv(4096)
-					if(not chunk):
-						break
-					body += chunk
-			except socket.timeout:
-				pass
 		finally:
 			sock.close()
 		if(not head):
@@ -546,7 +548,8 @@ class owasp_suite():
 	def config_006(self):
 
 		if(not self.args["zap_general"]["spider_turned_on"]):
-			raise Exception("Cannot run config_006 without zap spidering")
+			self.printer.aprint("config_006 skipped: it needs the ZAP spider (spider_scan = on)", 1)
+			return []
 
 		report_list = []
 
