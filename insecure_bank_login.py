@@ -57,14 +57,14 @@ def service_auth(username, password):
 	client.get(login_url)
 
 	# Initialize timer for login
-	rtt = time.time()
+	rtt = time.perf_counter()
 
 	# Make login POST request, following the redirect so responseBody holds
 	# the page the user lands on
 	post = client.post(login_url, data=payload, allow_redirects=True)
 
 	# Round trip time in milliseconds
-	rtt = (time.time()-rtt)*1000
+	rtt = (time.perf_counter()-rtt)*1000
 
 	# The login POST itself is the first response in the redirect chain
 	login_resp = post.history[0] if post.history else post
