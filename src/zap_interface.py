@@ -195,11 +195,13 @@ class AdaptZap():
 				next_report += 15
 			time.sleep(1)
 
-	def __write_api_key_file(self):
+	def __write_api_key_file(self, directory=None):
 		# ZAP applies the key=value lines of a -configfile at startup. Passing the
 		# API key this way keeps it off the command line, where any local user
-		# could read it with ps. mkstemp creates the file readable by us only.
-		fd, path = tempfile.mkstemp(prefix="adapt-zap-", suffix=".properties")
+		# could read it with ps. mkstemp creates the file readable by us only; it
+		# goes in ZAP's private -dir when there is one, so even if ADAPT is killed
+		# before removing it, it isn't left in a shared /tmp.
+		fd, path = tempfile.mkstemp(prefix="adapt-zap-", suffix=".properties", dir=directory)
 		# Java properties format: \uXXXX-escape (UTF-16 units) everything but ASCII
 		# letters and digits, so backslashes, '#', '=' or spaces in a configured key survive
 		escaped = ""
@@ -225,7 +227,7 @@ class AdaptZap():
 		# a directory owned by someone else, which could also hold a planted config).
 		opts = list(self.zap_opts)
 		if("-dir" not in opts or opts.index("-dir")+1 >= len(opts)):
-			return
+			return None
 		zap_home = opts[opts.index("-dir")+1]
 		try:
 			os.makedirs(zap_home, mode=0o700, exist_ok=True)
@@ -237,17 +239,21 @@ class AdaptZap():
 			raise Exception("ZAP's directory {} must be a directory owned by you with mode 0700 (it is uid {}, mode {:o}), "
 				"or other local users could read ZAP's API key and session data. Run ADAPT from a Linux filesystem you own "
 				"(not e.g. /mnt/c in WSL).".format(zap_home, st.st_uid, stat.S_IMODE(st.st_mode)))
+		return zap_home
 
 	def open(self):
 		self.printer.aprint("open zap daemon "+str(self.zap_path))
-		self.__protect_zap_home()
+		zap_home = self.__protect_zap_home()
 		key_file = None
 		try:
-			key_file = self.__write_api_key_file()
+			key_file = self.__write_api_key_file(zap_home)
 			# An argument list, not a shell command, so nothing in the path or
 			# opts is interpreted by a shell
 			zap_cmd = [self.zap_path] + list(self.zap_opts) + ["-configfile", key_file, "-port", str(self.port)]
-			self.p = subprocess.Popen(zap_cmd, stdout=subprocess.DEVNULL)
+			try:
+				self.p = subprocess.Popen(zap_cmd, stdout=subprocess.DEVNULL)
+			except OSError as e:
+				raise Exception("Could not start ZAP ({}). Check that zap_general.path in var/configuration.json points to an executable zap.sh.".format(e))
 			self.printer.aprint("Waiting for zap startup... ")
 
 			# Poll ZAP's API until it answers, instead of sleeping a fixed time:
