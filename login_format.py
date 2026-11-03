@@ -94,7 +94,7 @@ def service_auth(username, password):
 	session_id = re.match("PHPSESSID=(.*?);", dvwa_get.headers["set-cookie"]).group(1)
 
 	# Initialize timer for login 
-	rtt = time.time()
+	rtt = time.perf_counter()
 
 	# Set user_token into data payload 
 	payload["user_token"] = user_token
@@ -106,7 +106,8 @@ def service_auth(username, password):
 	dvwa_post = client.post(login_url, data=payload, cookies=cookie, allow_redirects=True)
 
 	# Get updated time 
-	rtt = time.time()-rtt
+	# Round trip time in milliseconds (the return value must be ms, not seconds)
+	rtt = (time.perf_counter()-rtt)*1000
 
 	# Make Sure the request values are not empty and return strings 
 	request_headers = ""
