@@ -21,7 +21,7 @@
 try:
 	import re, subprocess, time, urllib.request, requests, random, copy, os
 	import scipy.stats as stats
-	import itertools, os, errno, json
+	import itertools, os, errno, json, signal
 	from aprint import aprint
 	from urllib.parse import urlparse
 	from difflib import SequenceMatcher
@@ -543,54 +543,66 @@ class owasp_suite():
 		return reports
 	def crypst_001(self):
 		ret = []
-		parsed = urlparse(self.unstripped_target)
-		if(parsed.scheme == "http"):
-			note = "Target uses plain http://, so no TLS configuration was tested (testssl.sh skipped)"
-			self.printer.aprint(note, 1)
-			return [create_report("crypst_001", note), create_report("crypst_002", note)]
 
+		def not_tested(note):
+			# Severity low (not "none") so the note survives risk filtering and
+			# a skipped or failed TLS test can't look like a clean result.
+			self.printer.aprint(note, 1)
+			return [create_report(name, note, severity="low", owasp_association="6") for name in ("crypst_001", "crypst_002")]
+
+		parsed = urlparse(self.unstripped_target)
+		if(parsed.scheme.lower() != "https"):
+			return not_tested("Target is not an https:// URL ({}), so no TLS configuration was tested (testssl.sh skipped)".format(self.unstripped_target))
 		try:
 			port = parsed.port or 443
 		except ValueError:
-			port = 443
-		testssl_target = self.dns_target+":"+str(port)
+			return not_tested("Target {} has an invalid port, so no TLS configuration was tested".format(self.unstripped_target))
+		host = parsed.hostname
+		if(not host):
+			return not_tested("Could not find a host name in target {}, so no TLS configuration was tested".format(self.unstripped_target))
+		if(":" in host):
+			host = "["+host+"]"   # IPv6 literal
+		testssl_target = host+":"+str(port)
 
 		filename = os.getcwd()+"/tmp/ssl_test.json"
-		# testssl.sh refuses to overwrite an existing output file
-		try:
-			os.remove(filename)
-		except OSError as e:
-			if(e.errno != errno.ENOENT):
-				raise
-
 		failure = None
 		testssl_results = None
 		try:
-			x = self.__sub_setup(os.getcwd()+self.args["adapt_general"]["testssl_loc"], "-oJ", filename, testssl_target)
+			# testssl.sh refuses to overwrite an existing output file
+			if(os.path.exists(filename)):
+				os.remove(filename)
+			# Own session, so a timeout can kill testssl.sh and its openssl children
+			x = subprocess.Popen([os.getcwd()+self.args["adapt_general"]["testssl_loc"], "-oJ", filename, testssl_target],
+				stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 			try:
 				(out, err) = x.communicate(None, 1000)
 			except subprocess.TimeoutExpired:
-				x.kill()
+				os.killpg(x.pid, signal.SIGKILL)
 				x.communicate()
 				raise
-			with open(filename) as datafile:
-				testssl_results = json.load(datafile)
-			if(not isinstance(testssl_results, dict)):
-				raise ValueError("unexpected testssl.sh output")
+			try:
+				with open(filename) as datafile:
+					testssl_results = json.load(datafile)
+				if(not isinstance(testssl_results, dict)):
+					raise ValueError("unexpected testssl.sh output")
+			except Exception as e:
+				# Show why testssl.sh failed, not just that its output was unreadable
+				tail = err.decode("utf-8", "replace").strip()[-300:] or out.decode("utf-8", "replace").strip()[-300:]
+				raise Exception("{}; testssl.sh exit code {}: {}".format(e, x.returncode, tail))
 		except Exception as e:
 			failure = str(e)
 			testssl_results = None
-
-		try:
-			os.remove(filename)
-		except OSError as e:
-			if(e.errno != errno.ENOENT):
-				raise
+		finally:
+			try:
+				os.remove(filename)
+			except OSError:
+				pass
 
 		if(testssl_results is None):
-			note = "testssl.sh failed against "+testssl_target+" ("+failure+"); TLS configuration was not tested. Ensure dig, host, drill or nslookup is installed and the target accepts TLS connections"
-			self.printer.aprint(note, 1)
-			return [create_report("crypst_001", note), create_report("crypst_002", note)]
+			hint = ""
+			if(any(t in failure for t in ("dig", "nslookup", "drill"))):
+				hint = " Install dig/host (package bind9-dnsutils or dnsutils)."
+			return not_tested("testssl.sh failed against "+testssl_target+" ("+failure+"); TLS configuration was not tested."+hint)
 
 		# newer testssl.sh versions put per-run info before the host result,
 		# so find the entry that holds the actual host findings
@@ -600,9 +612,7 @@ class owasp_suite():
 				host_result = entry
 				break
 		if(testssl_results.get("scanTime") == "Scan interrupted" or host_result is None):
-			note = "testssl.sh did not return results for "+testssl_target+" (scan interrupted or target unreachable); TLS configuration was not tested"
-			self.printer.aprint(note, 1)
-			return [create_report("crypst_001", note), create_report("crypst_002", note)]
+			return not_tested("testssl.sh did not return results for "+testssl_target+" (scan interrupted or target unreachable); TLS configuration was not tested")
 
 		blocks = ["grease", "ciphers", "pfs", "fs", "serverPreferences", "serverDefaults", "headerResponse", "cipherTests", "browserSimulations"]		
 		

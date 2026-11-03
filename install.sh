@@ -107,7 +107,14 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	do_command sudo apt-get install python3-venv python3-pip -y
 	do_command sudo apt-get install default-jre -y
 	do_command sudo apt-get install nmap -y
-	do_command sudo apt-get install bind9-dnsutils -y
+	# testssl.sh needs dig/host; the package is bind9-dnsutils on current
+	# releases and dnsutils on older ones (before Ubuntu 20.10 / Debian 11)
+	if apt-cache show bind9-dnsutils &> /dev/null
+	then
+		do_command sudo apt-get install bind9-dnsutils -y
+	else
+		do_command sudo apt-get install dnsutils -y
+	fi
 	do_command sudo apt-get install docker.io -y
 	do_command sudo apt-get install git -y
 	# ZAP 2.16+ needs Java 17 or newer; default-jre is older on some releases.
