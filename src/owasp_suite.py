@@ -21,7 +21,7 @@
 try:
 	import re, subprocess, time, urllib.request, requests, random, copy, os
 	import scipy.stats as stats
-	import itertools, os, errno, json
+	import itertools, os, errno, json, sys
 	from aprint import aprint
 	from urllib.parse import urlparse
 	from difflib import SequenceMatcher
@@ -291,7 +291,7 @@ class owasp_suite():
 		badun_msgs = []
 		for i in range(0,reps):
 			# Alternate which login goes first, so effects of request order
-			# (connection reuse, caching) don't show up as a timing difference
+			# (warm-up, caching) don't show up as a timing difference
 			if(i % 2 == 0):
 				badpwd_msgs.append(self.zap.test_login(good_uname, bad_pass))
 				badun_msgs.append(self.zap.test_login(bad_uname, bad_pass))
@@ -343,10 +343,15 @@ class owasp_suite():
 		badun_rtts =  [ float(msg['rtt']) for msg in badun_msgs ]
 		avg_badun = sum( badun_rtts ) / len( badun_rtts )
 		res = stats.ttest_ind( badpwd_rtts, badun_rtts, equal_var=False )
+		if( max( badpwd_rtts + badun_rtts ) < 1.0 ):
+			# Almost certainly an auth module returning seconds, not milliseconds
+			print("ADAPT: ident_004: every login rtt is under 1 ms; check that the auth module returns rtt in milliseconds", file=sys.stderr)
 		# Require a difference big enough to matter as well as a significant
 		# one: with millisecond precision, tiny systematic differences can be
-		# "significant" without saying anything about the username.
-		min_diff_ms = max( 5.0, 0.1 * min( avg_badpwd, avg_badun ) )
+		# "significant" without saying anything about the username. A fixed
+		# floor, because the server-side work that gives a username away adds
+		# a fixed amount of time however slow the network is.
+		min_diff_ms = 5.0
 		if( res.pvalue < 0.05 and abs( avg_badpwd - avg_badun ) >= min_diff_ms ):
 			reports.append( create_report(
 			'ident_004',
@@ -359,7 +364,8 @@ class owasp_suite():
 			owasp_association="2",
 			misc=[
 				# plain floats: scipy's result object is not JSON serialisable
-				{ "statistic": float( res.statistic ), "pvalue": float( res.pvalue ), "df": float( res.df ) },
+				# (df only exists from scipy 1.11)
+				{ "statistic": float( res.statistic ), "pvalue": float( res.pvalue ), "df": float( res.df ) if hasattr( res, "df" ) else None },
 				"{} v/i attempts with average rtt of {:.1f} ms".format( len( badpwd_rtts), avg_badpwd ),
 				"{} i/i attempts with average rtt of {:.1f} ms".format( len( badun_rtts), avg_badun )] ) )
 			
