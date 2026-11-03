@@ -203,13 +203,14 @@ class owasp_suite():
 				r = self.zap.send_request(req)
 				html = str(r['responseBody'])
 			except Exception as e:
-				html = requests.get(url).text
+				try:
+					# Target may use a self-signed certificate; we only read the page
+					html = requests.get(url, timeout=15, verify=False).text
+				except Exception as e2:
+					self.printer.aprint("config_002: could not fetch "+url+": "+str(e2), 1)
+					continue
 			if (html):
-				soup = BeautifulSoup(html,'html.parser')
-				comments = soup.findAll(text=lambda text:isinstance(text, Comment))
-				comment_list = []
-				for comment in comments:
-					comment_list.append(str(comment))
+				comment_list = [str(c) for c in self.find_comments_in_html(html) if str(c).strip()]
 				if comment_list:
 					res.append({ "method":"GET", "url":url, "resp":html, "request":"GET "+url, "data":comment_list })
 		return res
@@ -228,12 +229,13 @@ class owasp_suite():
 		# and list the other URLs in misc.
 		seen = {}
 		for msg in messages:
-			# Only HTML can hold HTML comments; parsing images or scripts as
-			# HTML turns binary data and regex fragments into fake comments.
-			content_type = re.search(r"(?im)^content-type:\s*([^;\r\n]*)", str(msg.get('responseHeader', "")))
-			if (content_type and "html" not in content_type.group(1).lower()):
-				continue
 			try:
+				# Only HTML and XML (incl. SVG) can hold markup comments; parsing
+				# images or scripts as HTML turns binary data and regex
+				# fragments into fake comments.
+				content_type = re.search(r"(?im)^content-type:\s*([^;\r\n]*)", str(msg.get('responseHeader', "")))
+				if (content_type and not any(t in content_type.group(1).lower() for t in ("html", "xml"))):
+					continue
 				req = HTTPRequest.read_from_zap_message( msg )
 				if (self.zapReqHeader is None):
 					if (msg['requestHeader'] != None):
