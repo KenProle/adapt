@@ -18,7 +18,7 @@
 #  limitations under the License.
 #
 
-import os, sys, time, datetime, logging, subprocess, json, html, urllib, urllib.request, re, importlib
+import os, time, datetime, logging, subprocess, json, html, urllib, urllib.error, urllib.parse, urllib.request, re, importlib, socket
 #from httpparser.httprequest import HTTPRequest
 from zapv2 import ZAPv2
 from aprint import aprint
@@ -138,6 +138,12 @@ class AdaptZap():
 	def __del__(self):
 		self.close()
 
+	def close_zap_process(self):
+		# Used when startup fails: stop the ZAP we launched, whatever close_on_finish says
+		if(self.p is not None and self.p.poll() is None):
+			self.p.kill()
+			self.p.wait()
+
 	def close(self):
 		self.already_connected = False
 		self.already_opened = False
@@ -166,23 +172,36 @@ class AdaptZap():
 
 		# Poll ZAP's API until it answers, instead of sleeping a fixed time:
 		# stop early if the ZAP process exits, and give up after a timeout.
-		version_url = "{}:{}/JSON/core/view/version/?apikey={}".format(self.host, self.port, self.api_key)
+		version_url = "{}:{}/JSON/core/view/version/?{}".format(self.host, self.port, urllib.parse.urlencode({"apikey": self.api_key}))
 		no_proxy = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 		start = time.time()
+		next_report = 15
+		launcher_exited = False
 		while(True):
 			exit_code = self.p.poll()
-			if(exit_code is not None):
-				raise Exception("ZAP exited during startup (exit code {}). Check that {} runs on its own and that Java 17+ is installed.".format(exit_code, self.zap_path))
+			if(exit_code is not None and not launcher_exited):
+				if(exit_code != 0):
+					raise Exception("ZAP exited during startup (exit code {}). Check that {} runs on its own and that Java 17+ is installed.".format(exit_code, self.zap_path))
+				# A launcher that starts ZAP in the background and exits 0:
+				# keep polling the API instead of treating it as a failure.
+				launcher_exited = True
 			try:
 				with no_proxy.open(version_url, timeout=2) as resp:
 					version = json.loads(resp.read().decode("utf-8"))["version"]
 				break
-			except Exception:
-				pass
+			except urllib.error.HTTPError as e:
+				# ZAP is up but refused the request (e.g. API key rejected):
+				# waiting won't help, so stop with the real reason.
+				self.close_zap_process()
+				raise Exception("ZAP is running on {}:{} but its API refused the request: HTTP {} {}".format(self.host, self.port, e.code, e.reason))
+			except (urllib.error.URLError, ConnectionError, TimeoutError, socket.timeout):
+				pass   # not listening yet
 			if(time.time() - start > self.ZAP_STARTUP_TIMEOUT):
-				self.p.kill()
-				self.p.wait()
+				self.close_zap_process()
 				raise Exception("ZAP did not answer on {}:{} within {} seconds; giving up.".format(self.host, self.port, self.ZAP_STARTUP_TIMEOUT))
+			if(time.time() - start > next_report):
+				self.printer.aprint("Still waiting for ZAP ({:.0f}s)...".format(time.time() - start))
+				next_report += 15
 			time.sleep(1)
 
 		self.printer.aprint("ZAP {} ready after {:.0f}s".format(version, time.time() - start))
