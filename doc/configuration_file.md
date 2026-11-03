@@ -66,6 +66,18 @@ SSH:
 	username : the username to use. Use //stdin to enter user via stdin. 
 	password : the password to use. Use //stdin to enter password via stdin. 
 
+	known_hosts : ADAPT only connects to a server whose host key is already known, so it never
+		sends the SSH password to an unverified server. Keys are read from ~/.ssh/known_hosts,
+		plus this file if it is not 'default'. To add a key, check its fingerprint with the
+		server's admin, then run e.g. `ssh-keyscan -p 22 myserver >> ~/.ssh/known_hosts`.
+
+	accept_unknown_host_key : 'on' accepts a server whose key is not known, for this run only
+		(the key is not saved, and its fingerprint is printed). Not recommended. A key that
+		differs from a known one is always refused. Default: off.
+
+	If the logs can't be collected (e.g. the host key is refused), ADAPT says why and still
+	writes the report, without the server logs.
+
 	keywords : Capture lines with these space separated keywords. If set to 'none', will default to [ERROR, error, WARNING, warning]
 
 	log_paths : The space separated list of complete file paths to the log files. 
