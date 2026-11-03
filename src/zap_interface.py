@@ -201,7 +201,6 @@ class AdaptZap():
 		# could read it with ps. mkstemp creates the file readable by us only; it
 		# goes in ZAP's private -dir when there is one, so even if ADAPT is killed
 		# before removing it, it isn't left in a shared /tmp.
-		fd, path = tempfile.mkstemp(prefix="adapt-zap-", suffix=".properties", dir=directory)
 		# Java properties format: \uXXXX-escape (UTF-16 units) everything but ASCII
 		# letters and digits, so backslashes, '#', '=' or spaces in a configured key survive
 		escaped = ""
@@ -211,6 +210,8 @@ class AdaptZap():
 			else:
 				units = c.encode("utf-16-be")
 				escaped += "".join("\\u{:02x}{:02x}".format(units[i], units[i+1]) for i in range(0, len(units), 2))
+		# Create the file only once the content is ready, so a failure above leaves nothing behind
+		fd, path = tempfile.mkstemp(prefix="adapt-zap-", suffix=".properties", dir=directory)
 		try:
 			with os.fdopen(fd, "w", encoding="ascii") as f:
 				f.write("api.key="+escaped+"\n")
