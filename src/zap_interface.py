@@ -95,7 +95,9 @@ class AdaptZap():
 	def send_request(self, request):
 		resp = self.zap.core.send_request(request)
 		if( not isinstance(resp, list) or not isinstance(resp[0], dict)):
-			raise Exception("Request {} failed during test_logins. Expected zap message, got: {}".format(request, resp))
+			# Only the request line: the rest may hold session cookies, and
+			# this message can end up in the report's errors list
+			raise Exception("ZAP sendRequest failed for request {!r}: expected a ZAP message, got: {}".format(request.split("\r\n")[0], resp))
 		return resp[0]
 
 	def create_new_session(self, username, password):

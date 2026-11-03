@@ -160,7 +160,18 @@ class adapt_analysis():
 					relevant_cwes = []
 				))
 			 
+		errors = []
 		for i in range(len(owasp_results)):
+			# A test that crashed is not a finding: list it separately and
+			# regardless of the risk/confidence filters, so it can't be
+			# filtered away or reported as a "pass".
+			if(owasp_results[i].get("error")):
+				errors.append({
+					"name":owasp_results[i]["name"],
+					"description":owasp_results[i]["basic_description"],
+					"misc":owasp_results[i]["misc"]
+				})
+				continue
 			passed_conf = False
 			passed_risk = False
 			passed_active = False
@@ -204,6 +215,9 @@ class adapt_analysis():
 			self.final_results["adapt"] = self.__med_process_owasp(filtered_final)
 		else:
 			self.final_results["adapt"] = self.__low_process_owasp(filtered_final)
+
+		if(errors):
+			self.final_results["errors"] = errors
 
 		if(self.ssh_scan_data != []):
 			self.final_results["ssh_log_data"] = self.ssh_scan_data
