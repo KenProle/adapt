@@ -55,7 +55,7 @@ ADAPT:
 
 OUTPUT:
 	filetype : output will be either json or xml (recommended: json)
-	specific_filename : This will save output to this file. The file extension (.json or .xml) selects the output format and supercedes filetype.
+	specific_filename : This will save output to this file (none, or empty, means a timestamped file in ./output). The file extension (.json or .xml) selects the output format and supercedes filetype.
 	append : similar to specific filename but it appends to data file instead of overwrite. Appending only works with a .json file; append = on with an .xml file is rejected.
 
 SSH:
