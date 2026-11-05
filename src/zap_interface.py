@@ -140,18 +140,36 @@ class AdaptZap():
 	def __del__(self):
 		self.close()
 
-	def close_zap_process(self):
-		# Used when startup fails: stop the ZAP we launched, whatever close_on_finish says
-		if(self.p is not None and self.p.poll() is None):
+	def __stop_zap(self, use_api):
+		# Stop ZAP gently so it can finish writing its config: a SIGKILL while
+		# it saves leaves zap/config.xml truncated, and every later run then
+		# reports a config parse error. API shutdown first (if connected), then
+		# SIGTERM, and SIGKILL only if it still hasn't exited.
+		if(self.p is None or self.p.poll() is not None):
+			return
+		if(use_api and getattr(self, "zap", None) is not None):
+			try:
+				self.zap.core.shutdown()
+				self.p.wait(timeout=30)
+				return
+			except Exception:
+				pass   # API not answering, or ZAP slow to exit: fall through
+		try:
+			self.p.terminate()
+			self.p.wait(timeout=15)
+		except subprocess.TimeoutExpired:
 			self.p.kill()
 			self.p.wait()
+
+	def close_zap_process(self):
+		# Used when startup fails: stop the ZAP we launched, whatever close_on_finish says
+		self.__stop_zap(use_api=False)
 
 	def close(self):
 		self.already_connected = False
 		self.already_opened = False
-		if(self.p is not None and self.close_on_finish):
-			self.p.kill()
-			self.p.wait()
+		if(self.close_on_finish):
+			self.__stop_zap(use_api=True)
 
 	def __setup_context(self, excluded_paths, context_name):
 		contextid = self.zap.context.new_context(context_name)
