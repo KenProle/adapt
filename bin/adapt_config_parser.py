@@ -40,7 +40,7 @@ on_off = {"on":True, "off":False}
 def config_error(val):
 	print(val)
 	print("Quitting")
-	sys.exit()
+	sys.exit(1)
 
 # the output format a specific_filename selects; only json and xml files are supported
 def format_from_filename(filename):
