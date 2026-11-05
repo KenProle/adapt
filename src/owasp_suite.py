@@ -687,6 +687,11 @@ class owasp_suite():
 	
 	# this is also handled by zap
 	def err_002(self):
+		if(not self.args["zap_general"]["spider_turned_on"]):
+			# It sends its error-provoking requests to the pages the spider found
+			msg = "err_002 skipped: it needs the ZAP spider (spider_scan = on)"
+			print("ADAPT: "+msg, file=sys.stderr)
+			return [create_report("err_002", "SKIPPED: "+msg, error=True)]
 		# Trying to run test cases to produce stack traces
 		err = error_suite(self.args, self.zap)
 		reports = err.run()
