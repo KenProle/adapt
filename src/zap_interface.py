@@ -147,16 +147,16 @@ class AdaptZap():
 		# SIGTERM, and SIGKILL only if it still hasn't exited.
 		if(getattr(self, "_stopped", False)):
 			return   # close() runs again from __del__
+		self._stopped = True
 		running = self.p is not None and self.p.poll() is None
 		api_ok = False
-		if(use_api and getattr(self, "zap", None) is not None):
-			# Also when our launcher has already exited (it may have started ZAP
-			# in the background): the API is then the only way to stop ZAP.
-			api_ok = self.__api_shutdown()
-		self._stopped = True
-		if(not running):
-			return
 		try:
+			if(use_api and getattr(self, "zap", None) is not None):
+				# Also when our launcher has already exited (it may have started ZAP
+				# in the background): the API is then the only way to stop ZAP.
+				api_ok = self.__api_shutdown()
+			if(not running):
+				return
 			try:
 				# ZAP saves its session and config while shutting down: give it
 				# time after a successful API request before escalating
@@ -173,7 +173,7 @@ class AdaptZap():
 		finally:
 			# Whatever happened above (including a Ctrl-C while waiting), don't
 			# leave ZAP running
-			if(self.p.poll() is None):
+			if(self.p is not None and self.p.poll() is None):
 				self.p.kill()
 				self.p.wait()
 
