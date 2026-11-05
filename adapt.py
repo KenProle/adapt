@@ -161,16 +161,6 @@ def __unsupported_value(label, value, correct):
 	print("Please use any from: "+str(correct))
 	sys.exit(1)
 
-def __format_from_filename(filename, supported):
-	ext = os.path.splitext(filename)[1].lstrip(".").lower()
-	if(ext == ""):
-		print("Output file '"+filename+"' has no extension; it selects the output format.")
-		print("Please use a file name ending in one of: "+", ".join("."+x for x in supported))
-		sys.exit(1)
-	if(ext not in supported):
-		__unsupported_value("output file format", ext, supported)
-	return ext
-
 def _host_key_fingerprint(key):
 	# Same form as `ssh-keygen -lf`: SHA256:<unpadded base64>
 	return "SHA256:"+base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode("ascii").rstrip("=")
@@ -333,7 +323,7 @@ def main():
 		args = json.load(datafile)
 	datafile.close()
 
-	supported_file_formats = ["json", "xml", "stdout"]
+	supported_file_formats = ["json", "xml"]
 	supported_risk_conf_values = ["low", "medium", "high", "paranoid"]
 	supported_analysis_detail = ["low", "medium", "high", "full", "owasp10"]
 
@@ -348,14 +338,13 @@ def main():
 		sys.exit(1)
 	if(command_line_args.output != None):
 		args["adapt_general"]["output_file"] = command_line_args.output
-		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.output, ["json", "xml"])
 		# --output replaces the file, even if adapt.config sets append = on
 		args["adapt_general"]["append"] = False
 	if(command_line_args.append != None):
 		args["adapt_general"]["output_file"] = command_line_args.append
-		# get_results() can only append to JSON; XML would be overwritten
-		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.append, ["json"])
 		args["adapt_general"]["append"] = True
+	# Validate whichever output file is in effect (config or command line)
+	args["adapt_general"]["output_format"] = adapt_config_parser.validate_output(args["adapt_general"]["output_file"], args["adapt_general"]["append"], args["adapt_general"]["output_format"])
 
 	if(command_line_args.conf != None):
 		if(command_line_args.conf not in supported_risk_conf_values):
