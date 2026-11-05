@@ -2,7 +2,7 @@
 
 
 --target <url>: Set the target URL. This does not change `context` in adapt.config, which decides what ZAP spiders and scans, so keep the two in step.
---verbose : Turns on progress logging for this run, even if `adapt_verbose = off` in adapt.config.
+--verbose / --no-verbose : Turn progress logging on or off for this run, whatever `adapt_verbose` says in adapt.config. (These take no value; `--verbose True` is an error.)
 --output <file.json|file.xml> : Write results to this file, replacing it. The extension selects the format.
 --append <file.json> : Append results to this JSON file. Can't be combined with --output.
 --risk <[low, medium, high, paranoid]> : Specify how sensitive the results will be to discovered risks. 
