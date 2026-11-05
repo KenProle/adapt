@@ -21,6 +21,7 @@
 #
 
 import os
+import shutil
 import sys
 import time
 
@@ -198,12 +199,13 @@ class _AcceptUnknownHostKey(paramiko.MissingHostKeyPolicy):
 		print("ADAPT: WARNING: accepting unverified SSH host key for {}: {} {}".format(
 			hostname, key.get_name(), _host_key_fingerprint(key)), file=sys.stderr)
 
-def _local_log_name(log_path):
-	# Local file name in ./tmp/ for a downloaded log: the remote file's base name
+def _local_log_name(log_path, index):
+	# Unique local file name for a downloaded log: the list position plus the
+	# remote file's base name. None if the path does not end in a file name.
 	name = log_path.split("/")[-1]
-	if(name in ("", ".", "..") or "." not in name):
+	if(name in ("", ".", "..")):
 		return None
-	return name
+	return "{}_{}".format(index, name)
 
 def ssh_connect(args, attempts=3):
 	# Returns a connected (SSHClient, SFTPClient). The server's host key is
@@ -297,25 +299,24 @@ def ssh_capture_dmesg_logs(args):
 	client, ftp_client = ssh_connect(args)
 
 	printer.aprint("Getting files...")
-	fetched = set()
-	for i in args["ssh_config"]["log_paths"]:
+	log_dir = "./tmp/ssh_logs/"
+	os.makedirs(log_dir, exist_ok=True)
+	fetched = []
+	for index, i in enumerate(args["ssh_config"]["log_paths"]):
 
 		log_path = i
 		if(log_path == "apache2"):
 			log_path = "/var/log/http-error.log"
 		elif(log_path == "php"):
 			log_path = "/var/log/php-scripts.log"
-		filename = _local_log_name(log_path)
+		filename = _local_log_name(log_path, index)
 		if(filename is None):
-			print("ADAPT: SSH log path skipped (it must end in a file name with an extension): "+log_path, file=sys.stderr)
+			print("ADAPT: SSH log path skipped (it must end in a file name): "+log_path, file=sys.stderr)
 			continue
-		if(filename in fetched):
-			print("ADAPT: SSH log {} skipped: another log path also ends in {}".format(log_path, filename), file=sys.stderr)
-			continue
-		fetched.add(filename)
 
 		try:
-			ftp_client.get(log_path, "./tmp/"+filename)
+			ftp_client.get(log_path, log_dir+filename)
+			fetched.append((log_path, log_dir+filename))
 		except:
 			printer.aprint("SSH ERROR: cannot get file at location: "+log_path, 2)
 	printer.aprint("Done")
@@ -326,6 +327,7 @@ def ssh_capture_dmesg_logs(args):
 		client.close()
 	except:
 		pass
+	return fetched
 
 def main():
 	printer.aprint("Loading config file")
@@ -430,19 +432,23 @@ def main():
 	pentester.run()
 	printer.aprint("Test bed finished")
 	if( pentester.successful ):
+		ssh_logs = []
 		if(args["ssh_config"]["turned_on"]):
 			try:
-				ssh_capture_dmesg_logs(args)
+				ssh_logs = ssh_capture_dmesg_logs(args)
 			except Exception as e:
 				# Keep the scan results: write the report without the server logs
 				print("ADAPT: server logs not collected over SSH: "+str(e), file=sys.stderr)
 				printer.aprint(traceback.format_exc(), 2)
 	
-		analysis = adapt_analysis( pentester.zap_results, pentester.owasp_results,args=args)
+		analysis = adapt_analysis( pentester.zap_results, pentester.owasp_results,args=args, ssh_logs=ssh_logs)
 		analysis.get_results()
 
 	for i in os.listdir("./tmp/"):
-		os.remove("./tmp/"+i)
+		if(os.path.isdir("./tmp/"+i)):
+			shutil.rmtree("./tmp/"+i)
+		else:
+			os.remove("./tmp/"+i)
 
 	return None
 
