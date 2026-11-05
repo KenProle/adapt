@@ -232,7 +232,7 @@ class owasp_suite():
 		try:
 			messages = self.zap.spider_messages()
 		except Exception as e:
-			# spider not run (no spider id) or ZAP error: nothing to report from ZAP
+			# ZAP error: nothing to report from ZAP
 			self.printer.aprint("config_002: could not get spider messages: "+str(e), 1)
 			return report_list
 
@@ -283,6 +283,11 @@ class owasp_suite():
 		conf = 1.0
 
 		# comments in zap urls
+		if(not self.args["zap_general"]["spider_turned_on"]):
+			# only the nmap half runs: say so, so the result can't look complete
+			msg = "config_002 partly skipped: HTML comments from ZAP's pages need the ZAP spider (spider_scan = on)"
+			print("ADAPT: "+msg, file=sys.stderr)
+			report_list.append(create_report("config_002", "SKIPPED: "+msg, error=True))
 		temp = self.generate_comment_reports_by_msgs()
 		if ( temp ):
 			report_list = report_list + temp

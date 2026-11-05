@@ -129,11 +129,11 @@ class error_suite():
 
 	def run(self):
 		report_list = []
-		if self.zapper.spider_messages() != None:
-			bar = progressbar.ProgressBar(maxval=len(self.zapper.spider_messages()), widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
+		# one call: each one costs a ZAP API request per spidered URL
+		messages = self.zapper.spider_messages()
+		if messages:
+			bar = progressbar.ProgressBar(maxval=len(messages), widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
 			if(self.args["adapt_general"]["verbose"]):bar.start()
-			#for zapmsg in self.zapper.spider_messages():
-			messages = self.zapper.spider_messages()
 			for i in range(len(messages)):
 				if(self.args["adapt_general"]["verbose"]):bar.update(i)
 				zapmsg = messages[i]
