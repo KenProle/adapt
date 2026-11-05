@@ -140,18 +140,66 @@ class AdaptZap():
 	def __del__(self):
 		self.close()
 
+	def __stop_zap(self, use_api):
+		# Stop ZAP gently so it can finish writing its config: a SIGKILL while
+		# it saves leaves zap/config.xml truncated, and every later run then
+		# reports a config parse error. API shutdown first (if connected), then
+		# SIGTERM, and SIGKILL only if it still hasn't exited.
+		if(getattr(self, "_stopped", False)):
+			return   # close() runs again from __del__
+		self._stopped = True
+		running = self.p is not None and self.p.poll() is None
+		api_ok = False
+		try:
+			if(use_api and getattr(self, "zap", None) is not None):
+				# Also when our launcher has already exited (it may have started ZAP
+				# in the background): the API is then the only way to stop ZAP.
+				api_ok = self.__api_shutdown()
+			if(not running):
+				return
+			try:
+				# ZAP saves its session and config while shutting down: give it
+				# time after a successful API request before escalating
+				self.p.wait(timeout=120 if api_ok else 0.1)
+				return
+			except subprocess.TimeoutExpired:
+				pass
+			if(api_ok):
+				self.printer.aprint("ZAP did not exit within 120s of the shutdown request; sending SIGTERM", 1)
+			self.p.terminate()
+			self.p.wait(timeout=15)
+		except subprocess.TimeoutExpired:
+			self.printer.aprint("ZAP did not exit after SIGTERM; killing it", 1)
+		finally:
+			# Whatever happened above (including a Ctrl-C while waiting), don't
+			# leave ZAP running
+			if(self.p is not None and self.p.poll() is None):
+				self.p.kill()
+				self.p.wait()
+
+	def __api_shutdown(self):
+		# zapv2's own call has no timeout, so a wedged ZAP could hang ADAPT on
+		# exit; call the API directly, with one
+		url = "{}:{}/JSON/core/action/shutdown/".format(self.host, self.port)
+		req = urllib.request.Request(url, headers={"X-ZAP-API-Key": self.api_key})
+		no_proxy = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+		try:
+			with no_proxy.open(req, timeout=10) as resp:
+				resp.read()
+			return True
+		except Exception as e:
+			self.printer.aprint("ZAP shutdown request failed: {}".format(e), 1)
+			return False
+
 	def close_zap_process(self):
 		# Used when startup fails: stop the ZAP we launched, whatever close_on_finish says
-		if(self.p is not None and self.p.poll() is None):
-			self.p.kill()
-			self.p.wait()
+		self.__stop_zap(use_api=False)
 
 	def close(self):
 		self.already_connected = False
 		self.already_opened = False
-		if(self.p is not None and self.close_on_finish):
-			self.p.kill()
-			self.p.wait()
+		if(self.close_on_finish):
+			self.__stop_zap(use_api=True)
 
 	def __setup_context(self, excluded_paths, context_name):
 		contextid = self.zap.context.new_context(context_name)

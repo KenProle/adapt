@@ -86,7 +86,14 @@ class PenTester():
 		printer.aprint("Initializing zap")
 		zapper = AdaptZap(self.args)
 		printer.aprint("Zap initialized")
-		
+		try:
+			self.__scan(zapper)
+		finally:
+			# Stop ZAP here, while everything still works, rather than
+			# leaving it to __del__ during interpreter shutdown
+			zapper.close()
+
+	def __scan(self, zapper):
 		printer.aprint("Checking for authorization availability...")
 		if(zapper.auth_success):
 			printer.aprint("Authorization is available!")
