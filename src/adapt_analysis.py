@@ -106,8 +106,10 @@ class report():
 		}
 
 class adapt_analysis():
-	def __init__(self, zap_results, owasp_results, args):
+	def __init__(self, zap_results, owasp_results, args, ssh_logs=None):
 		self.args = args
+		# (remote_path, local_file) pairs downloaded over SSH
+		self.ssh_logs = ssh_logs or []
 		self.owasp_results = owasp_results
 		self.zap_results = zap_results
 
@@ -236,52 +238,30 @@ class adapt_analysis():
 	def ssh_scan(self):
 		if(self.args["ssh_config"]["turned_on"] == False):
 			return []
-		filelist = os.listdir(os.getcwd()+"/tmp/")
 		final = []
-
+		direction = self.args["ssh_config"]["read_direction"]
 		try:
 			read_amount = int(self.args["ssh_config"]["read_amount"])
-		except:
-			self.args["ssh_config"]["read_direction"] = "full"
+		except (ValueError, TypeError, KeyError):
+			direction = "full"
 
-		for i in filelist:
-			in_listing = False
-			for j in self.args["ssh_config"]["log_paths"]:
-				if(j.endswith(i)):
-					in_listing = True
-					break
-			if(in_listing == False):
-				continue
-			f_handle = open("./tmp/"+i)
-			data = f_handle.readlines()
-			f_handle.close()
-			if(self.args["ssh_config"]["read_direction"] == "top"):
-				for line in range(0, max(len(data), read_amount)):
-					for word in self.args["ssh_config"]["keywords"]:
-						if(word in data[line]):
-							final.append({
-								"file":i,
-								"line_number":line,
-								"value":data[line]
-							})
-			elif(self.args["ssh_config"]["read_direction"] == "bottom"):
-				for line in range(max(len(data)-1, read_amount-1), -1, -1):
-					for word in self.args["ssh_config"]["keywords"]:
-						if(word in data[line]):
-							final.append({
-								"file":i,
-								"line_number":line,
-								"value":data[line]
-							})
-			else:
-				for line in range(len(data)):
-					for word in self.args["ssh_config"]["keywords"]:
-						if(word in data[line]):
-							final.append({
-								"file":i,
-								"line_number":line,
-								"value":data[line]
-							})
+		for remote_path, local_file in self.ssh_logs:
+			with open(local_file, errors="replace") as f_handle:
+				data = f_handle.readlines()
+			first = 0
+			if(direction == "top"):
+				data = data[:max(read_amount, 0)]
+			elif(direction == "bottom"):
+				first = max(len(data) - max(read_amount, 0), 0)
+				data = data[first:]
+			for offset, text in enumerate(data):
+				for word in self.args["ssh_config"]["keywords"]:
+					if(word in text):
+						final.append({
+							"file":remote_path,
+							"line_number":first + offset + 1,
+							"value":text
+						})
 
 		return final
 	def __owasp10_owasp(self, results):
