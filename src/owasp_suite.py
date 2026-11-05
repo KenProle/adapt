@@ -240,6 +240,7 @@ class owasp_suite():
 		# many pages. Report each distinct comment once, on the first URL it was seen,
 		# and list the other URLs in misc.
 		seen = {}
+		self.zap_comment_urls = set()   # (comment, url) pairs, for de-duplicating the nmap half
 		for msg in messages:
 			try:
 				# Only HTML and XML (incl. SVG) can hold markup comments; parsing
@@ -289,28 +290,45 @@ class owasp_suite():
 
 		# comments in nmap urls
 		if (self.nmap_crawl_size != None):
-			p = self.__sub_setup("nmap", "--script", "http-errors", "--script-args", "httpspider.maxpagecount="+self.nmap_crawl_size, self.stripped_target)
+			cmd = ["nmap", "--script", "http-errors", "--script-args", "httpspider.maxpagecount="+self.nmap_crawl_size, self.stripped_target]
 		else:
-			p = self.__sub_setup("nmap", "--script", "http-errors", self.stripped_target)
+			cmd = ["nmap", "--script", "http-errors", self.stripped_target]
 
 		ignore_nmap = False
 		nmap_results = ""
+		p = None
 		try:
+			# Own session, so a timeout can kill nmap and anything it spawned
+			p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 			(out, err) = p.communicate(None, timeout=90)
-			regular = out.decode("utf-8", "replace")
-			nmap_results = regular
-		except:
+			nmap_results = out.decode("utf-8", "replace")
+		except BaseException as e:
+			# Timeout, error or Ctrl-C: nmap runs in its own session, so the
+			# terminal's SIGINT doesn't reach it; stop it and reap it.
+			if (p is not None):
+				try:
+					os.killpg(p.pid, signal.SIGKILL)
+				except (ProcessLookupError, PermissionError):
+					pass   # already gone
+				try:
+					p.communicate(timeout=10)
+				except Exception:
+					pass
+			if (not isinstance(e, Exception)):
+				raise
 			ignore_nmap = True
-			
+			self.printer.aprint("config_002: nmap failed or timed out: "+str(e), 1)
+
 		# nmap_results = "Found the following error pages: https://help.disqus.com/customer/portal/articles/466253-what-html-tags-are-allowed-within-comments-"
 		if "Found the following error pages" in nmap_results and not ignore_nmap :
 			urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', nmap_results)
 			comments = self.find_comments_in_html_by_urls(urls)
-			if comments:
-				for c in comments:
-					report = create_report("config_002", "Found comments in HTML of URLs - NMAP", "medium", c["request"], 1.0, c["data"])
-					report_list.append(report)
-
+			already = getattr(self, "zap_comment_urls", set())
+			for c in comments:
+				# Skip comments the ZAP half already reported for this URL
+				new_comments = [d for d in c["data"] if (d.strip(), c["url"]) not in already]
+				if new_comments:
+					report_list.append(create_report("config_002", "html comment - NMAP", severity=sev, owasp_association="6", path=c["url"], request=c["request"], misc=new_comments))
 
 		return report_list
 
