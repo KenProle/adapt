@@ -300,8 +300,11 @@ def ssh_capture_dmesg_logs(args):
 
 	printer.aprint("Getting files...")
 	log_dir = "./tmp/ssh_logs/"
-	os.makedirs(log_dir, exist_ok=True)
+	# Server logs can be sensitive: keep the download directory private
+	os.makedirs(log_dir, mode=0o700, exist_ok=True)
+	os.chmod(log_dir, 0o700)
 	fetched = []
+	seen_paths = set()
 	for index, i in enumerate(args["ssh_config"]["log_paths"]):
 
 		log_path = i
@@ -314,11 +317,21 @@ def ssh_capture_dmesg_logs(args):
 			print("ADAPT: SSH log path skipped (it must end in a file name): "+log_path, file=sys.stderr)
 			continue
 
+		if(log_path in seen_paths):
+			print("ADAPT: SSH log path skipped (already fetched): "+log_path, file=sys.stderr)
+			continue
+		seen_paths.add(log_path)
+
 		try:
 			ftp_client.get(log_path, log_dir+filename)
 			fetched.append((log_path, log_dir+filename))
-		except:
+		except Exception as e:
+			print("ADAPT: cannot get SSH log {}: {}".format(log_path, e), file=sys.stderr)
 			printer.aprint("SSH ERROR: cannot get file at location: "+log_path, 2)
+			try:
+				os.remove(log_dir+filename)
+			except OSError:
+				pass
 	printer.aprint("Done")
 	
 	try:
@@ -427,28 +440,29 @@ def main():
 			print("Fix the SSH settings in adapt.config, or set ssh_get_logs = off to scan without server logs.", file=sys.stderr)
 			sys.exit(1)
 
-	printer.aprint("Test bed setup starting...")
-	pentester = PenTester(args)
-	pentester.run()
-	printer.aprint("Test bed finished")
-	if( pentester.successful ):
-		ssh_logs = []
-		if(args["ssh_config"]["turned_on"]):
-			try:
-				ssh_logs = ssh_capture_dmesg_logs(args)
-			except Exception as e:
-				# Keep the scan results: write the report without the server logs
-				print("ADAPT: server logs not collected over SSH: "+str(e), file=sys.stderr)
-				printer.aprint(traceback.format_exc(), 2)
+	try:
+		printer.aprint("Test bed setup starting...")
+		pentester = PenTester(args)
+		pentester.run()
+		printer.aprint("Test bed finished")
+		if( pentester.successful ):
+			ssh_logs = []
+			if(args["ssh_config"]["turned_on"]):
+				try:
+					ssh_logs = ssh_capture_dmesg_logs(args)
+				except Exception as e:
+					# Keep the scan results: write the report without the server logs
+					print("ADAPT: server logs not collected over SSH: "+str(e), file=sys.stderr)
+					printer.aprint(traceback.format_exc(), 2)
 	
-		analysis = adapt_analysis( pentester.zap_results, pentester.owasp_results,args=args, ssh_logs=ssh_logs)
-		analysis.get_results()
-
-	for i in os.listdir("./tmp/"):
-		if(os.path.isdir("./tmp/"+i)):
-			shutil.rmtree("./tmp/"+i)
-		else:
-			os.remove("./tmp/"+i)
+			analysis = adapt_analysis( pentester.zap_results, pentester.owasp_results,args=args, ssh_logs=ssh_logs)
+			analysis.get_results()
+	finally:
+		for i in os.listdir("./tmp/"):
+			if(os.path.isdir("./tmp/"+i)):
+				shutil.rmtree("./tmp/"+i)
+			else:
+				os.remove("./tmp/"+i)
 
 	return None
 

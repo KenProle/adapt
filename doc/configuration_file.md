@@ -84,7 +84,7 @@ SSH:
 	keywords : Capture lines with these space separated keywords. If set to 'none', will default to [ERROR, error, WARNING, warning]
 
 	log_paths : The space separated list of complete file paths to the log files. Each is downloaded under a unique local name, so
-	logs with the same base name or no extension work. Findings report the remote path.
+	logs with the same base name or no extension work. Findings report the remote path and the 1-based line number (as editors show it).
 
 	read_amount : Limit the number of lines looked at. 
 

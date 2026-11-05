@@ -259,7 +259,7 @@ class adapt_analysis():
 					if(word in text):
 						final.append({
 							"file":remote_path,
-							"line_number":first + offset,
+							"line_number":first + offset + 1,
 							"value":text
 						})
 
