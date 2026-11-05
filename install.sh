@@ -61,11 +61,23 @@ function do_command {
 function clone_pinned {
 	local repo=$1 dir=$2 commit=$3
 	local partial="$dir.partial"
-	rm -rf "$partial"
+	do_command rm -rf "$partial"
 	do_command git init -q "$partial"
 	do_command git -C "$partial" fetch -q --depth 1 "$repo" "$commit"
 	do_command git -C "$partial" -c advice.detachedHead=false checkout -q FETCH_HEAD
-	mv "$partial" "$dir"
+	do_command mv "$partial" "$dir"
+}
+
+# An existing copy is kept, but say so if it isn't at the pinned commit (e.g.
+# an older unpinned install, or after the pin was bumped).
+function check_pinned {
+	local dir=$1 commit=$2 head
+	head=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
+	if [ "$head" != "$commit" ]
+	then
+		echo "  WARNING: $dir is at ${head:-an unknown commit}, not the pinned $commit."
+		echo "  To use the pinned version, delete $dir and re-run ./install.sh."
+	fi
 }
 
 if [ "$1" == "clean" ]; then
@@ -198,6 +210,7 @@ elif [ "$(uname -s)" == "Linux" ]; then
 		clone_pinned "$TESTSSL_REPO" "$launch_dir"/lib/testssl.sh "$TESTSSL_COMMIT"
 	else
 		echo "FOUND"
+		check_pinned "$launch_dir"/lib/testssl.sh "$TESTSSL_COMMIT"
 	fi
 
 	echo -n "Checking for SecLists: "
@@ -207,6 +220,7 @@ elif [ "$(uname -s)" == "Linux" ]; then
 		clone_pinned "$SECLISTS_REPO" "$launch_dir"/var/SecLists "$SECLISTS_COMMIT"
 	else
 		echo "FOUND"
+		check_pinned "$launch_dir"/var/SecLists "$SECLISTS_COMMIT"
 	fi
 
 	mkdir -p "$launch_dir"/output

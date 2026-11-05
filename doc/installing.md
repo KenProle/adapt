@@ -1,7 +1,8 @@
 # Installing and running ADAPT
 
 ADAPT targets Linux. It was last tested on Ubuntu 26.04 with Python 3.14 under
-WSL2. Other distributions may work but are unsupported; macOS install is partial
+WSL2, and needs Python 3.12 or newer (the pinned scipy requires it). Other
+distributions may work but are unsupported; macOS install is partial
 and native Windows is unsupported (use WSL, see below).
 
 If running in a vm, it is recommended that it is at least dual core and has
