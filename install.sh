@@ -30,6 +30,13 @@ launch_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # To upgrade ZAP, change this version and re-run the installer.
 ZAP_VERSION=2.17.0
+# testssl.sh and SecLists are pinned to the commits ADAPT was last tested with,
+# because upstream changes have broken ADAPT before (a moved SecLists file, a
+# new testssl.sh JSON layout). Bump them deliberately and re-test.
+TESTSSL_REPO=https://github.com/testssl/testssl.sh
+TESTSSL_COMMIT=6f0afecee2193135dfa83408e2486bb1d5586496
+SECLISTS_REPO=https://github.com/danielmiessler/SecLists.git
+SECLISTS_COMMIT=68bcd12457978649d41ae4f56e3b5d2db2b72560
 ZAP_DIR=/opt/ZAP_$ZAP_VERSION
 ZAP_URL=https://github.com/zaproxy/zaproxy/releases/download/v$ZAP_VERSION/ZAP_${ZAP_VERSION}_Linux.tar.gz
 
@@ -48,6 +55,31 @@ function do_command {
 	fi
 }
 
+# Shallow-fetch one pinned commit of a repo into a directory. It goes into
+# <dir>.partial first and is moved into place only when complete, so an
+# interrupted download isn't mistaken for an installed copy next time.
+function clone_pinned {
+	local repo=$1 dir=$2 commit=$3
+	local partial="$dir.partial"
+	do_command rm -rf "$partial"
+	do_command git init -q "$partial"
+	do_command git -C "$partial" fetch -q --depth 1 "$repo" "$commit"
+	do_command git -C "$partial" -c advice.detachedHead=false checkout -q FETCH_HEAD
+	do_command mv "$partial" "$dir"
+}
+
+# An existing copy is kept, but say so if it isn't at the pinned commit (e.g.
+# an older unpinned install, or after the pin was bumped).
+function check_pinned {
+	local dir=$1 commit=$2 head
+	head=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
+	if [ "$head" != "$commit" ]
+	then
+		echo "  WARNING: $dir is at ${head:-an unknown commit}, not the pinned $commit."
+		echo "  To use the pinned version, delete $dir and re-run ./install.sh."
+	fi
+}
+
 if [ "$1" == "clean" ]; then
 	# Remove everything this script put inside the checkout (system packages
 	# and /opt/ZAP_* are left alone), plus the reports in output/.
@@ -57,7 +89,7 @@ if [ "$1" == "clean" ]; then
 		exit 1
 	fi
 	echo "Cleaning $launch_dir..."
-	for path in var/SecLists lib/testssl.sh lib/paramiko .venv var/adapt_installed
+	for path in var/SecLists var/SecLists.partial lib/testssl.sh lib/testssl.sh.partial lib/paramiko .venv var/adapt_installed
 	do
 		if [ -e "$launch_dir/$path" ]
 		then
@@ -163,7 +195,7 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	# the user, not root; ADAPT runs as the user and must be able to write
 	# here. Earlier versions of this script used sudo, so hand any root-owned
 	# leftovers back to the user.
-	for path in output lib/testssl.sh var/SecLists lib/paramiko var/adapt_installed
+	for path in output tmp lib/testssl.sh var/SecLists lib/paramiko var/adapt_installed
 	do
 		if [ -e "$launch_dir/$path" ] && [ -n "$(find "$launch_dir/$path" ! -user "$(id -u)" -print -quit)" ]
 		then
@@ -175,18 +207,20 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	if [ ! -d "$launch_dir"/lib/testssl.sh ]
 	then
 		echo "NOT FOUND"
-		do_command git clone --depth 1 https://github.com/drwetter/testssl.sh "$launch_dir"/lib/testssl.sh
+		clone_pinned "$TESTSSL_REPO" "$launch_dir"/lib/testssl.sh "$TESTSSL_COMMIT"
 	else
 		echo "FOUND"
+		check_pinned "$launch_dir"/lib/testssl.sh "$TESTSSL_COMMIT"
 	fi
 
 	echo -n "Checking for SecLists: "
 	if [ ! -d "$launch_dir"/var/SecLists ]
 	then
 		echo "NOT FOUND (downloading, this can take a few minutes)"
-		do_command git clone --depth 1 https://github.com/danielmiessler/SecLists.git "$launch_dir"/var/SecLists
+		clone_pinned "$SECLISTS_REPO" "$launch_dir"/var/SecLists "$SECLISTS_COMMIT"
 	else
 		echo "FOUND"
+		check_pinned "$launch_dir"/var/SecLists "$SECLISTS_COMMIT"
 	fi
 
 	mkdir -p "$launch_dir"/output

@@ -1,7 +1,8 @@
 # Installing and running ADAPT
 
 ADAPT targets Linux. It was last tested on Ubuntu 26.04 with Python 3.14 under
-WSL2. Other distributions may work but are unsupported; macOS install is partial
+WSL2, and needs Python 3.12 or newer (the pinned scipy requires it). Other
+distributions may work but are unsupported; macOS install is partial
 and native Windows is unsupported (use WSL, see below).
 
 If running in a vm, it is recommended that it is at least dual core and has
@@ -22,11 +23,16 @@ The installer:
 * installs apt packages, and Java 17+ if the installed Java is older (newer ZAP needs it)
 * installs ZAP into `/opt/ZAP_<version>` with a `/opt/zap` symlink. The version is
   set once, in `ZAP_VERSION` at the top of `install.sh` (currently 2.17.0)
-* shallow-clones testssl.sh into `lib/` and SecLists into `var/`
-* creates a Python venv at `./.venv` from `requirements.txt`
+* shallow-clones testssl.sh into `lib/` and SecLists into `var/`, at the commits
+  pinned in `TESTSSL_COMMIT` and `SECLISTS_COMMIT` in `install.sh`
+* creates a Python venv at `./.venv` from `requirements.txt`, whose versions are
+  pinned to the ones ADAPT was last tested with
+
+To update a dependency, change its pin, re-run `./install.sh` (for testssl.sh or
+SecLists, delete `lib/testssl.sh` or `var/SecLists` first), and re-test.
 
 The installer creates its files as your user. Re-running `./install.sh` is safe,
-and hands `output/`, `lib/testssl.sh`, `var/SecLists` and `var/adapt_installed`
+and hands `output/`, `tmp/`, `lib/testssl.sh`, `var/SecLists` and `var/adapt_installed`
 back to you if an older install left them owned by root. A full install takes
 about 2 minutes plus the SecLists download.
 
