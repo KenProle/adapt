@@ -504,6 +504,7 @@ class owasp_suite():
 		report_list = []
 		results = []
 		errors = 0
+		answered = []   # (method, status, request, body) of non-CONNECT methods that got a 2xx
 
 		# get and post are standardized, there is no error if they give a page
 		# BLAH is not a real http verb. This makes some web servers give interesting errors
@@ -519,7 +520,8 @@ class owasp_suite():
 					# settings don't apply and it isn't in ZAP's history.
 					req, resp = self.__raw_connect()
 				else:
-					req = "{} {}/ HTTP/1.0\r\n\r\n".format(m, self.unstripped_target)
+					# Content-Length: 0, or servers answer a body-less PUT/PATCH with 411/400
+					req = "{} {}/ HTTP/1.0\r\nContent-Length: 0\r\n\r\n".format(m, self.unstripped_target.rstrip("/"))
 					resp = self.zap.send_request( req )
 				status = int(resp["responseHeader"].split()[1])
 			except Exception as e:
@@ -529,25 +531,40 @@ class owasp_suite():
 				continue
 
 			results.append("{}: HTTP {}".format(m, status))
-			html = str(resp['responseBody'])
+			accepted = 200 <= status < 300
 			if(m == "CONNECT"):
-				if(200 <= status < 300):
+				if(accepted):
 					# A 2xx alone doesn't prove a working tunnel (some frameworks
 					# answer every method with 200), hence the lower confidence.
 					report_list.append(create_report("inpval_003", "Server answered CONNECT with HTTP {}; it may act as an open proxy/tunnel (not verified).".format(status), severity="medium", request=req, cwe=441, owasp_association="6", confidence=0.5))
 				continue
-			if(status == 200):
-				report_list.append(create_report("inpval_003", "Valid response from potentially vulnerable verbs.", severity="low", request=req, confidence=1.0))
-				if( html ):
-					soup = BeautifulSoup( html, 'html.parser' )
-					if( soup.html ):
-						msg = "Received unexpected HTML in response on uncommon HTTP methods"
-						# misc is a truncated version of the page
-						misc = str( soup.html )
-						if( len( misc ) > 100 ):
-							misc = misc[:97] + "..."
-						report = create_report("inpval_003", msg, severity="low", request=req, cwe=285, confidence=1.0, misc=[misc])
-						report_list.append( report )
+			if(accepted):
+				answered.append((m, status, req, str(resp['responseBody'])))
+
+		# BLAH is not a real method: if it gets a 2xx too, the server answers any
+		# method alike, so a 2xx says little about what the others actually did.
+		catch_all = any(m == "BLAH" for m, _, _, _ in answered)
+		for m, status, req, html in answered:
+			if(m == "BLAH"):
+				report_list.append(create_report("inpval_003", "Server accepts an invented HTTP method (BLAH answered HTTP {}); 2xx answers to other methods may not mean they are supported.".format(status), severity="low", request=req, cwe=650, owasp_association="6", confidence=1.0))
+				continue
+			# any 2xx: e.g. 201 Created or 204 No Content to PUT/DELETE means the
+			# method was accepted; PUT and DELETE can change content on the server
+			sev = "medium" if m in ("PUT", "DELETE") else "low"
+			desc = "{} accepted (HTTP {}): valid response from a potentially vulnerable verb.".format(m, status)
+			if(catch_all):
+				desc += " The server also accepts invented methods, so this may not mean {} is supported.".format(m)
+			report_list.append(create_report("inpval_003", desc, severity=sev, request=req, cwe=650, owasp_association="6", confidence=0.5 if catch_all else 1.0))
+			if( html ):
+				soup = BeautifulSoup( html, 'html.parser' )
+				if( soup.html ):
+					msg = "Received unexpected HTML in response to {}".format(m)
+					# misc is a truncated version of the page
+					misc = str( soup.html )
+					if( len( misc ) > 100 ):
+						misc = misc[:97] + "..."
+					report = create_report("inpval_003", msg, severity="low", request=req, cwe=285, confidence=1.0, misc=[misc])
+					report_list.append( report )
 
 		# Always record what each verb got back, including the ones that could not be sent
 		desc = "HTTP verb tampering: response status per method"
