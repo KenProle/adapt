@@ -204,13 +204,30 @@ class owasp_suite():
 		comments = soup.findAll(text=lambda text:isinstance(text, Comment))
 		return comments
 
+	@staticmethod
+	def build_raw_get_request(url):
+		# Origin-form request line (path and query) and a Host header that carries
+		# any non-default port.
+		parts = urlparse(url)
+		target = parts.path or "/"
+		if (parts.query):
+			target += "?"+parts.query
+		host = parts.hostname or ""
+		if (":" in host):
+			host = "["+host+"]"   # IPv6 literal
+		default_port = {"http":80, "https":443}.get(parts.scheme)
+		if (parts.port is not None and parts.port != default_port):
+			host += ":"+str(parts.port)
+		return "GET {0} HTTP/1.1\r\nHost: {1}\r\n\r\n".format(target, host)
+
 	def find_comments_in_html_by_urls(self, urls):
 		res = []
 		for url in urls:
-			path = urlparse(url).path
-			host = urlparse(url).hostname
-			scheme = urlparse(url).scheme
-			req = "GET {0} {1}/1.1\r\nhost: {2}\r\n\r\n".format(path, scheme, host)
+			try:
+				req = self.build_raw_get_request(url)
+			except ValueError as e:
+				self.printer.aprint("config_002: skipping malformed URL "+url+": "+str(e), 1)
+				continue
 			try:
 				r = self.zap.send_request(req)
 				html = str(r['responseBody'])
