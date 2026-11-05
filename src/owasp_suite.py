@@ -108,6 +108,7 @@ class owasp_suite():
 		self.nmap_crawl_size = self.args["adapt_general"]["nmap_crawl_size"]
 		self.nmap_results = []
 		self.nmap_failed = False
+		self.zap_comment_urls = set()   # (comment, normalised url) pairs reported by config_002's ZAP half
 		self.printer.aprint("Finished setup")
 
 	def run(self):
@@ -159,14 +160,6 @@ class owasp_suite():
 		self.printer.aprint("Owasp done")
 		return ret
 
-	def __sub_setup(self, *args):
-		p = subprocess.Popen([i for i in args],
-			stdin=subprocess.PIPE,
-			stdout=subprocess.PIPE,
-			stderr=subprocess.PIPE)
-		return p
-
-
 	def info_002(self):
 		w = wig(
 			url=self.stripped_target,
@@ -205,20 +198,37 @@ class owasp_suite():
 		return comments
 
 	@staticmethod
-	def build_raw_get_request(url):
-		# Origin-form request line (path and query) and a Host header that carries
-		# any non-default port.
+	def normalise_url(url):
+		# Lowercase scheme and host, drop the default port, strip a trailing '/'
+		# from the path, keep the query. Used to compare ZAP and nmap URLs.
 		parts = urlparse(url)
-		target = parts.path or "/"
+		scheme = parts.scheme.lower()
+		host = (parts.hostname or "").lower()
+		if (":" in host):
+			host = "["+host+"]"   # IPv6 literal
+		if (parts.port is not None and parts.port != {"http":80, "https":443}.get(scheme)):
+			host += ":"+str(parts.port)
+		out = scheme+"://"+host+parts.path.rstrip("/")
 		if (parts.query):
-			target += "?"+parts.query
+			out += "?"+parts.query
+		return out
+
+	@staticmethod
+	def build_raw_get_request(url):
+		# Absolute-form request line like the rest of this file, so ZAP's sendRequest
+		# uses the right scheme and port (origin-form is sent as plain http), plus a
+		# Host header that carries any non-default port.
+		parts = urlparse(url)
+		path = parts.path or "/"
+		if (parts.query):
+			path += "?"+parts.query
 		host = parts.hostname or ""
 		if (":" in host):
 			host = "["+host+"]"   # IPv6 literal
 		default_port = {"http":80, "https":443}.get(parts.scheme)
 		if (parts.port is not None and parts.port != default_port):
 			host += ":"+str(parts.port)
-		return "GET {0} HTTP/1.1\r\nHost: {1}\r\n\r\n".format(target, host)
+		return "GET {0}://{1}{2} HTTP/1.1\r\nHost: {1}\r\n\r\n".format(parts.scheme, host, path)
 
 	def find_comments_in_html_by_urls(self, urls):
 		res = []
@@ -241,7 +251,7 @@ class owasp_suite():
 			if (html):
 				comment_list = [str(c) for c in self.find_comments_in_html(html) if str(c).strip()]
 				if comment_list:
-					res.append({ "method":"GET", "url":url, "resp":html, "request":"GET "+url, "data":comment_list })
+					res.append({ "method":"GET", "url":url, "resp":html, "request":req, "data":comment_list })
 		return res
 
 	def generate_comment_reports_by_msgs(self):
@@ -257,7 +267,7 @@ class owasp_suite():
 		# many pages. Report each distinct comment once, on the first URL it was seen,
 		# and list the other URLs in misc.
 		seen = {}
-		self.zap_comment_urls = set()   # (comment, url) pairs, for de-duplicating the nmap half
+		self.zap_comment_urls = set()   # reset per run; filled below for de-duplicating the nmap half
 		for msg in messages:
 			try:
 				# Only HTML and XML (incl. SVG) can hold markup comments; parsing
@@ -281,6 +291,7 @@ class owasp_suite():
 				key = str(comment).strip()
 				if (not key):
 					continue
+				self.zap_comment_urls.add((key, self.normalise_url(url)))
 				if (key in seen):
 					if (url not in seen[key]["urls"]):
 						seen[key]["urls"].append(url)
@@ -319,6 +330,8 @@ class owasp_suite():
 			p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 			(out, err) = p.communicate(None, timeout=90)
 			nmap_results = out.decode("utf-8", "replace")
+			if (p.returncode != 0):
+				self.printer.aprint("config_002: nmap exited with status "+str(p.returncode)+": "+err.decode("utf-8", "replace").strip(), 1)
 		except BaseException as e:
 			# Timeout, error or Ctrl-C: nmap runs in its own session, so the
 			# terminal's SIGINT doesn't reach it; stop it and reap it.
@@ -340,12 +353,25 @@ class owasp_suite():
 		if "Found the following error pages" in nmap_results and not ignore_nmap :
 			urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', nmap_results)
 			comments = self.find_comments_in_html_by_urls(urls)
-			already = getattr(self, "zap_comment_urls", set())
+			# One report per distinct comment, like the ZAP half, skipping
+			# (comment, url) pairs the ZAP half already reported
+			seen = {}
 			for c in comments:
-				# Skip comments the ZAP half already reported for this URL
-				new_comments = [d for d in c["data"] if (d.strip(), c["url"]) not in already]
-				if new_comments:
-					report_list.append(create_report("config_002", "html comment - NMAP", severity=sev, owasp_association="6", path=c["url"], request=c["request"], misc=new_comments))
+				norm = self.normalise_url(c["url"])
+				for d in c["data"]:
+					key = d.strip()
+					if (not key or (key, norm) in self.zap_comment_urls):
+						continue
+					if (key in seen):
+						if (c["url"] not in seen[key]["urls"]):
+							seen[key]["urls"].append(c["url"])
+					else:
+						seen[key] = {"urls":[c["url"]], "request":c["request"]}
+			for key, info in seen.items():
+				misc = [key]
+				if (len(info["urls"]) > 1):
+					misc.append("Also found on: "+", ".join(info["urls"][1:]))
+				report_list.append(create_report("config_002", "html comment - NMAP", severity=sev, owasp_association="6", path=info["urls"][0], request=info["request"], misc=misc))
 
 		return report_list
 
