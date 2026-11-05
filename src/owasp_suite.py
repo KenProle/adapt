@@ -536,8 +536,9 @@ class owasp_suite():
 					# answer every method with 200), hence the lower confidence.
 					report_list.append(create_report("inpval_003", "Server answered CONNECT with HTTP {}; it may act as an open proxy/tunnel (not verified).".format(status), severity="medium", request=req, cwe=441, owasp_association="6", confidence=0.5))
 				continue
-			if(status == 200):
-				report_list.append(create_report("inpval_003", "Valid response from potentially vulnerable verbs.", severity="low", request=req, confidence=1.0))
+			if(200 <= status < 300):
+				# any 2xx: e.g. 201 Created or 204 No Content to PUT/DELETE means the verb was accepted
+				report_list.append(create_report("inpval_003", "{} accepted (HTTP {}): valid response from a potentially vulnerable verb.".format(m, status), severity="low", request=req, confidence=1.0))
 				if( html ):
 					soup = BeautifulSoup( html, 'html.parser' )
 					if( soup.html ):
