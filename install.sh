@@ -33,7 +33,7 @@ ZAP_VERSION=2.17.0
 # testssl.sh and SecLists are pinned to the commits ADAPT was last tested with,
 # because upstream changes have broken ADAPT before (a moved SecLists file, a
 # new testssl.sh JSON layout). Bump them deliberately and re-test.
-TESTSSL_REPO=https://github.com/drwetter/testssl.sh
+TESTSSL_REPO=https://github.com/testssl/testssl.sh
 TESTSSL_COMMIT=6f0afecee2193135dfa83408e2486bb1d5586496
 SECLISTS_REPO=https://github.com/danielmiessler/SecLists.git
 SECLISTS_COMMIT=68bcd12457978649d41ae4f56e3b5d2db2b72560
