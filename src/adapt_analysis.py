@@ -119,7 +119,6 @@ class adapt_analysis():
 		self.output_format = self.__check_output_format(self.args["adapt_general"]["output_format"])
 		tm = datetime.datetime.now()
 		self.output_file = self.args["adapt_general"]["output_file"]
-		self.output_format = self.args["adapt_general"]["output_format"]
 		backup_name = "adaptOut_{}_{}{}".format(tm.day, tm.hour, tm.minute)
 		if(self.output_file == None):
 			self.output_file = "./output/"+backup_name+".{}".format(self.output_format)

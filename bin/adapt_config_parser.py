@@ -42,6 +42,15 @@ def config_error(val):
 	print("Quitting")
 	sys.exit()
 
+# the output format a specific_filename selects; only json and xml files are supported
+def format_from_filename(filename):
+	ext = os.path.splitext(filename)[1].lstrip(".").lower()
+	if(ext == ""):
+		config_error("Output file '"+filename+"' has no extension; it selects the output format.\nPlease use a file name ending in one of: .json, .xml")
+	if(ext not in ("json", "xml")):
+		config_error("Unsupported output file format value: "+ext+"\nPlease use any from: ['json', 'xml']")
+	return ext
+
 def set_get(val, s, e):
 	if(val in s):
 		return val
@@ -117,6 +126,11 @@ def get_config_defaults(contents):
 		contents["adapt_general"]["output_file"] = out_op["specific_filename"]
 	contents["adapt_general"]["output_format"] = set_get(out_op["filetype"], files, "json")
 	contents["adapt_general"]["append"] = onf(out_op["append"])
+	if(contents["adapt_general"]["output_file"] != None):
+		# The file name decides the format, so the two can never disagree
+		contents["adapt_general"]["output_format"] = format_from_filename(contents["adapt_general"]["output_file"])
+		if(contents["adapt_general"]["append"] and contents["adapt_general"]["output_format"] != "json"):
+			config_error("append = on only works with a .json output file; "+out_op["specific_filename"]+" would be overwritten. Set append = off or use a .json file name.")
 
 	# SSH options
 	contents["ssh_config"]["turned_on"] = onf(ssh_op["ssh_get_logs"])
