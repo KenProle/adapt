@@ -22,7 +22,7 @@ import os, sys, stat, contextlib, tempfile, time, datetime, logging, subprocess,
 #from httpparser.httprequest import HTTPRequest
 from zapv2 import ZAPv2
 from aprint import aprint
-import progressbar
+from progress import ProgressBar
 
 class AdaptZap():
 	# Seconds to wait for ZAP's API to come up before giving up
@@ -303,7 +303,7 @@ class AdaptZap():
 
 		self.printer.aprint("scanid: "+str(scanid))
 
-		bar = progressbar.ProgressBar(maxval=100, widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
+		bar = ProgressBar(maxval=100)
 
 		if(self.args["adapt_general"]["verbose"]):bar.start()
 		while(True):
@@ -318,7 +318,7 @@ class AdaptZap():
 	def pscan(self):
 		self.printer.aprint("Pscan start")
 		self.check()
-		bar = progressbar.ProgressBar(maxval=100, widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
+		bar = ProgressBar(maxval=100)
 		self.printer.aprint("This could take a while. Please be patient.")
 		if(self.args["adapt_general"]["verbose"]):bar.start()
 		total = int(self.zap.pscan.records_to_scan)
@@ -332,7 +332,7 @@ class AdaptZap():
 		self.printer.aprint("Ascan start")
 		self.check()
 		scanid = self.zap.ascan.scan(contextid=self.contextid)
-		bar = progressbar.ProgressBar(maxval=100, widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
+		bar = ProgressBar(maxval=100)
 		if(self.args["adapt_general"]["verbose"]):bar.start()
 		while(True):
 			scan_progress = int(self.zap.ascan.status(scanid))

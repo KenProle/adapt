@@ -9,3 +9,9 @@ SecLists/
 paramiko/
 testssl.sh
 .venv/
+*.partial/
+
+# Claude Code: personal settings, notes and agent worktrees
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
