@@ -42,8 +42,9 @@ def run_nmap(host, arguments):
 	raised only when nmap produced no usable XML."""
 	if not host or host.startswith("-"):
 		raise ValueError("invalid nmap target: %r" % host)
+	# stdin=DEVNULL: otherwise nmap reads keypresses from ADAPT's terminal
 	proc = subprocess.run(["nmap", "-oX", "-", host] + list(arguments),
-		stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	xml_text = proc.stdout.decode("utf-8", "replace")
 	try:
 		ET.fromstring(xml_text)

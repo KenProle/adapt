@@ -66,6 +66,7 @@ class RunNmapTest(unittest.TestCase):
 		args, kwargs = run.call_args
 		self.assertEqual(args[0], ["nmap", "-oX", "-", "example.test", "-p80", "--script", "http-methods"])
 		self.assertFalse(kwargs.get("shell", False))
+		self.assertIs(kwargs.get("stdin"), nmap_scripts.subprocess.DEVNULL)
 
 	def test_rejects_option_like_target(self):
 		for host in ("", "-iL/etc/passwd", "--script=x"):
