@@ -37,7 +37,7 @@ try:
 	from timeit import default_timer
 	from error import error_suite
 	from time import sleep
-	from nmap_scripts import nmap_scripting
+	from nmap_scripts import nmap_scripting, nmap_target, target_options
 except Exception as e:
 	import sys
 	print("Cannot import module: "+str(e)+". Quitting...")
@@ -122,8 +122,8 @@ class owasp_suite():
 
 		if(self.args["adapt_general"]["nmap_script_ports"] != "skip"):
 			self.printer.aprint("Nmap Starting")
-			nmap_scripter = nmap_scripting(self.unstripped_target, self.args["adapt_general"]["nmap_script_ports"])
 			try:
+				nmap_scripter = nmap_scripting(self.unstripped_target, self.args["adapt_general"]["nmap_script_ports"])
 				self.nmap_results = nmap_scripter.run()
 			except Exception as nmap_exception:
 				self.printer.aprint("NMAP SCRIPT FAILED: "+str(nmap_exception), 2)
@@ -329,15 +329,17 @@ class owasp_suite():
 			report_list = report_list + temp
 
 		# comments in nmap urls
-		if (self.nmap_crawl_size != None):
-			cmd = ["nmap", "--script", "http-errors", "--script-args", "httpspider.maxpagecount="+self.nmap_crawl_size, self.stripped_target]
-		else:
-			cmd = ["nmap", "--script", "http-errors", self.stripped_target]
-
 		ignore_nmap = False
 		nmap_results = ""
 		p = None
 		try:
+			# The bare host and the target's own port: nmap can't resolve
+			# "host:port/path", and its default ports may not include the target's
+			host, port = nmap_target(self.unstripped_target)
+			cmd = ["nmap"] + target_options(host) + ["-p", str(port), "--script", "http-errors"]
+			if (self.nmap_crawl_size != None):
+				cmd += ["--script-args", "httpspider.maxpagecount="+self.nmap_crawl_size]
+			cmd.append(host)
 			# Own session, so a timeout can kill nmap and anything it spawned
 			p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 			(out, err) = p.communicate(None, timeout=90)

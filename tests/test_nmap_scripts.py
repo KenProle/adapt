@@ -24,7 +24,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
 import nmap_scripts
-from nmap_scripts import nmap_scripting, run_nmap, script_outputs
+from nmap_scripts import nmap_scripting, nmap_target, run_nmap, script_outputs
 
 # Trimmed from real `nmap -oX -` output.
 XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -84,17 +84,48 @@ class RunNmapTest(unittest.TestCase):
 
 
 class NmapScriptingTest(unittest.TestCase):
-	def test_run_builds_arguments(self):
-		s = nmap_scripting("http://www.example.test/app", "80 443")
+	def run_args(self, target, ports, scripts=None):
+		s = nmap_scripting(target, ports, scripts)
 		with mock.patch.object(nmap_scripts, "run_nmap", return_value=XML) as run:
 			s.run()
-		run.assert_called_once_with("example.test", ["-p80,443", "--script", "http-methods"])
+		return run.call_args[0]
+
+	def test_run_builds_arguments(self):
+		# the host is kept as given (www. is part of it), -Pn skips ping
+		self.assertEqual(self.run_args("http://www.example.test/app", "80 443"),
+			("www.example.test", ["-Pn", "-p80,443", "--script", "http-methods"]))
+
+	def test_target_port_is_scanned(self):
+		# "host:8080/path" isn't a host nmap can resolve (#81): scan host, port 8080
+		self.assertEqual(self.run_args("http://192.0.2.1:8080/insecure-bank", "80"),
+			("192.0.2.1", ["-Pn", "-p80,8080", "--script", "http-methods"]))
+
+	def test_target_port_not_repeated(self):
+		self.assertEqual(self.run_args("https://example.test/", "80 443")[1][1], "-p80,443")
+
+	def test_empty_ports_still_scan_the_target_port(self):
+		# an empty port list used to give nmap a bare "-p" (#83)
+		self.assertEqual(self.run_args("http://example.test:8080/", "")[1][1], "-p8080")
 
 	def test_all_ports(self):
-		s = nmap_scripting("https://example.test/", None, ["a", "b"])
-		with mock.patch.object(nmap_scripts, "run_nmap", return_value=XML) as run:
-			s.run()
-		run.assert_called_once_with("example.test", ["--script", "a", "--script", "b"])
+		self.assertEqual(self.run_args("https://example.test/", None, ["a", "b"]),
+			("example.test", ["-Pn", "--script", "a", "--script", "b"]))
+
+	def test_ipv6(self):
+		self.assertEqual(self.run_args("http://[2001:db8::1]:8080/", "80"),
+			("2001:db8::1", ["-Pn", "-6", "-p80,8080", "--script", "http-methods"]))
+
+
+class NmapTargetTest(unittest.TestCase):
+	def test_hosts_and_ports(self):
+		self.assertEqual(nmap_target("http://Example.test:8080/a?b"), ("example.test", 8080))
+		self.assertEqual(nmap_target("https://example.test"), ("example.test", 443))
+		self.assertEqual(nmap_target("example.test/x"), ("example.test", 80))
+
+	def test_rejects_unusable_targets(self):
+		for url in ("http://-iLfoo/", "http:///path", "http://example.test:99999/"):
+			with self.assertRaises(ValueError):
+				nmap_target(url)
 
 
 if __name__ == "__main__":

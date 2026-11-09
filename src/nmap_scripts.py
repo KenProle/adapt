@@ -20,6 +20,7 @@
 
 import subprocess
 import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
 from pprint import pprint
 
 
@@ -52,28 +53,36 @@ def run_nmap(host, arguments):
 		raise RuntimeError("nmap failed (exit %d): %s" % (proc.returncode, proc.stderr.decode("utf-8", "replace").strip()))
 	return xml_text
 
-def translate_url(url):
-	if(url.startswith("https://")):
-		url = url[8:]
-	elif(url.startswith("http://")):
-		url = url[7:]
+def nmap_target(url):
+	"""The host and port nmap should scan for a target URL: the bare host name
+	(no scheme, port or path, which nmap can't resolve) and the URL's port, or
+	the scheme's default port. Raises ValueError for a URL nmap can't use."""
+	u = urlparse(url if "://" in url else "http://" + url)
+	host = u.hostname   # lower-case, without brackets around an IPv6 address
+	if not host or host.startswith("-"):
+		raise ValueError("invalid nmap target in %r" % url)
+	port = u.port or (443 if u.scheme == "https" else 80)
+	return host, port
 
-	url_parts = url.split("/")
 
-	if(url_parts[0].startswith("www.")):
-		url = url_parts[0][4:]
-	else:
-		url = url_parts[0]
-
-	return url
+def target_options(host):
+	"""nmap options every scan of the target needs. -Pn: skip host discovery,
+	since many hosts (e.g. Windows) drop ping, and nmap would then call the
+	host down and scan nothing; ZAP has just reached it, so it is up. -6 for
+	an IPv6 address."""
+	return ["-Pn"] + (["-6"] if ":" in host else [])
 
 class nmap_scripting():
 	def __init__(self, target, ports, scripts_to_run=None):
+		self.target, target_port = nmap_target(target)
 		if(ports != None):
-			self.port_values = ["-p"+",".join(ports.split())]
+			# the configured ports plus the target's own port (e.g. 8080)
+			port_list = ports.split()
+			if(str(target_port) not in port_list):
+				port_list.append(str(target_port))
+			self.port_values = ["-p"+",".join(port_list)]
 		else:
-			self.port_values = []
-		self.target = translate_url(target)
+			self.port_values = []   # "all": nmap's default port list
 		self.__valid_scripts = []
 		if(scripts_to_run is None):
 			# for current project goals only one script is run
@@ -152,7 +161,7 @@ class nmap_scripting():
 				self.__valid_scripts.append(i)
 
 	def run(self):
-		arguments = list(self.port_values)
+		arguments = target_options(self.target) + list(self.port_values)
 		for script in self.__valid_scripts:
 			arguments += ["--script", script]
 		return script_outputs(run_nmap(self.target, arguments))

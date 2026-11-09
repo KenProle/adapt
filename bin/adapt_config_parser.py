@@ -115,8 +115,9 @@ def get_config_defaults(contents):
 	contents["adapt_general"]["analysis_detail"] = set_get(ast_op["detail"], detail, "medium")
 	contents["adapt_general"]["target_name"] = ast_op["target"]
 	contents["adapt_general"]["context_name"] = ast_op["context"]
-	if(ast_op["nmap_script_ports"] == "default"):
-		# default to just 80 to make things faster 
+	if(ast_op["nmap_script_ports"].strip() in ("default", "")):
+		# default to just 80 to make things faster (the target's own port is
+		# always added); an empty value would otherwise give nmap a bare -p
 		contents["adapt_general"]["nmap_script_ports"] = "80"
 	elif(ast_op["nmap_script_ports"] == "all"):
 		contents["adapt_general"]["nmap_script_ports"] = None
