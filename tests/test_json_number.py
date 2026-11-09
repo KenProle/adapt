@@ -25,6 +25,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 for d in ("src", "bin", "lib", "var"):
 	sys.path.insert(0, os.path.join(here, "..", d))
 
+reason = ""
 try:
 	from owasp_suite import json_number
 	from welch import welch_ttest
@@ -33,7 +34,7 @@ except BaseException as e:   # owasp_suite exits if ADAPT's packages aren't inst
 	reason = "owasp_suite needs ADAPT's venv: " + str(e)
 
 
-@unittest.skipIf(json_number is None, "owasp_suite not importable")
+@unittest.skipIf(json_number is None, reason)
 class JsonNumberTest(unittest.TestCase):
 	def test_finite_values_unchanged(self):
 		self.assertEqual(json_number(2.5), 2.5)
