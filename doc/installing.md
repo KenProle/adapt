@@ -28,17 +28,17 @@ The installer:
 * creates a Python venv at `./.venv` from `requirements.txt`, whose versions are
   pinned to the ones ADAPT was last tested with (it stops early if `python3` is
   older than 3.12, and recreates a `.venv` made by an older Python)
-* records a fingerprint of the pins (`requirements.txt` and `install.sh`) in
-  `var/adapt_installed`
 
 `requirements.txt` pins ADAPT's direct Python dependencies only; the packages
 they depend on are resolved by pip at install time and can change between
 installs.
 
-When the pins change (for example after `git pull`), `adapt.py` notices the
-fingerprint no longer matches and re-runs the installer before starting. That
-updates the Python packages; an existing `lib/testssl.sh` or `var/SecLists` that
-isn't at the pinned commit is kept, with a warning.
+When the pins change (for example after `git pull`), re-run `./install.sh`
+yourself: `adapt.py` only runs it automatically when the install is missing.
+That updates the Python packages (except wig: pip keeps an installed wig after
+its commit changes, so run `.venv/bin/pip install --force-reinstall --no-deps`
+with its `requirements.txt` line). An existing `lib/testssl.sh` or `var/SecLists`
+that isn't at the pinned commit is kept, with a warning.
 
 To update a dependency, change its pin, re-run `./install.sh` (for testssl.sh or
 SecLists, delete `lib/testssl.sh` or `var/SecLists` first), and re-test. For

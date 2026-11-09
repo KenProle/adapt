@@ -28,22 +28,6 @@ if(sys.version_info[0] < 3):
 	print("Please run ADAPT in python 3")
 	sys.exit()
 
-def pins_changed():
-	# install.sh writes this fingerprint of requirements.txt + install.sh (which
-	# holds the ZAP/testssl.sh/SecLists pins) to var/adapt_installed; see
-	# pin_fingerprint there. A mismatch means the pins changed since the install.
-	import hashlib
-	try:
-		with open("./var/adapt_installed") as f:
-			installed = f.read().strip()
-		with open("./requirements.txt", "rb") as f:
-			data = f.read()
-		with open("./install.sh", "rb") as f:
-			data += f.read()
-	except OSError:
-		return True
-	return installed != hashlib.sha256(data).hexdigest()
-
 if(not os.path.isfile("./var/adapt_installed") or
 	not os.path.isdir("./lib/testssl.sh") or
 	not os.path.isdir("./var/SecLists") or
@@ -51,11 +35,6 @@ if(not os.path.isfile("./var/adapt_installed") or
 	import subprocess
 	print("It seems that you have not run the installer script.")
 	print("We will now run that briefly before continuing.")
-	subprocess.call(["./install.sh"])
-elif(pins_changed()):
-	import subprocess
-	print("ADAPT's pinned dependencies have changed since the last install.")
-	print("Re-running the installer to update them before continuing.")
 	subprocess.call(["./install.sh"])
 
 # install.sh puts ADAPT's Python packages in ./.venv; re-run under it if

@@ -125,14 +125,6 @@ function check_python {
 	fi
 }
 
-# A fingerprint of the pins (requirements.txt and this script, which holds the
-# ZAP version and the testssl.sh/SecLists commits). It is written to
-# var/adapt_installed, and adapt.py re-runs this installer when it changes.
-# adapt.py computes the same value; keep the two in sync.
-function pin_fingerprint {
-	cat "$launch_dir"/requirements.txt "$launch_dir"/install.sh | sha256sum | cut -d' ' -f1
-}
-
 # Install the Python dependencies (requirements.txt, including wig) into
 # ./.venv as the current user. adapt.py re-runs itself with .venv/bin/python.
 # A venv avoids PEP 668 "externally-managed-environment" errors on current
@@ -238,7 +230,7 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	# the user, not root; ADAPT runs as the user and must be able to write
 	# here. Earlier versions of this script used sudo, so hand any root-owned
 	# leftovers back to the user.
-	for path in output tmp lib/testssl.sh var/SecLists lib/paramiko var/adapt_installed
+	for path in output tmp lib/testssl.sh lib/testssl.sh.partial var/SecLists var/SecLists.partial lib/paramiko var/adapt_installed
 	do
 		if [ -e "$launch_dir/$path" ] && [ -n "$(find "$launch_dir/$path" ! -user "$(id -u)" -print -quit)" ]
 		then
@@ -270,8 +262,8 @@ elif [ "$(uname -s)" == "Linux" ]; then
 
 	install_python_deps
 
-	# Mark the install as done, recording which pins it installed.
-	pin_fingerprint > "$launch_dir"/var/adapt_installed
+	# Now to write out a temp file which will indicate that we ran the install script
+	touch "$launch_dir"/var/adapt_installed
 
 	echo "ADAPT install: FINISHED"
 else
