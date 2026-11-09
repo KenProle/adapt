@@ -24,15 +24,27 @@ from zapv2 import ZAPv2
 from aprint import aprint
 from progress import ProgressBar
 
+# A logout keyword as a word of its own in a URL path: logout, log-out,
+# log_out, logoff, signout, sign-off, ... in any case, either after a
+# non-letter (/logout, j_spring_security_logout, /LOGOUT.do) or as the
+# capitalised part of a camelCase name (/doLogout, /signOut). Not inside
+# other words (blogoffers, /log_output.jsp, /log-outage).
+LOGOUT_WORD = ("(?:(?<![A-Za-z])(?i:(?:log|sign)[-_]?o(?:ut|ff))"
+	"|(?<=[a-z])(?:L(?i:og)|S(?i:ign))[-_]?(?i:o(?:ut|ff)))(?![a-z])")
+
+
+def logout_exclusion(context):
+	"""Java regex (ZAP matches context exclusions against the whole URL) for
+	URLs under the context whose path, not host or query, contains a logout
+	keyword. Following a logout link ends the logged-in session, so
+	everything spidered or tested after it only sees the login page (#67).
+	re.escape's output is also a valid Java regex."""
+	return re.escape(context) + "[^?#]*" + LOGOUT_WORD + ".*"
+
+
 class AdaptZap():
 	# Seconds to wait for ZAP's API to come up before giving up
 	ZAP_STARTUP_TIMEOUT = 180
-	# URLs ZAP must never request: following a logout link ends the logged-in
-	# session, so everything spidered or tested after it is only the login
-	# page (e.g. Spring's /j_spring_security_logout). Java regex, whole URL.
-	# (?<![a-z]): a word start, so "blogoffers" isn't matched but
-	# "j_spring_security_logout" and "/Logout.php" are.
-	LOGOUT_URLS = "(?i).*(?<![a-z])(log[-_]?out|sign[-_]?out|log[-_]?off).*"
 
 	def __init__(self, args):
 		self.args = args
@@ -217,8 +229,11 @@ class AdaptZap():
 		for e in excluded_paths:
 			self.printer.aprint("Excluded path: {}".format(e))
 			self.zap.context.exclude_from_context(context_name, "{}{}".format(self.context,e))
-		self.printer.aprint("Excluded logout URLs: {}".format(self.LOGOUT_URLS))
-		self.zap.context.exclude_from_context(context_name, self.LOGOUT_URLS)
+		logout = logout_exclusion(self.context)
+		self.printer.aprint("Excluded logout URLs: {}".format(logout))
+		if(re.fullmatch(logout, self.target) or re.fullmatch(logout, self.context.rstrip("/")+"/")):
+			print("ADAPT: WARNING: the target URL {} looks like a logout URL, so ZAP won't spider or scan it".format(self.target), file=sys.stderr)
+		self.zap.context.exclude_from_context(context_name, logout)
 		return contextid
 
 	def __wait_for_api(self, version_url, opener, start):
