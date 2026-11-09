@@ -8,8 +8,10 @@ zap/
 SecLists/
 paramiko/
 testssl.sh
-# Claude Code: personal settings and agent worktrees
-.claude/settings.local.json
-.claude/worktrees/
 .venv/
 *.partial/
+
+# Claude Code: personal settings, notes and agent worktrees
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
