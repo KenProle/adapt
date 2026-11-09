@@ -27,7 +27,8 @@ The installer:
   pinned in `TESTSSL_COMMIT` and `SECLISTS_COMMIT` in `install.sh`
 * creates a Python venv at `./.venv` from `requirements.txt`, whose versions are
   pinned to the ones ADAPT was last tested with (it stops early if `python3` is
-  older than 3.12, and recreates a `.venv` made by an older Python)
+  older than 3.12, and recreates a `.venv` built by a different Python version,
+  e.g. after a distribution upgrade)
 
 `requirements.txt` pins ADAPT's direct Python dependencies only; the packages
 they depend on are resolved by pip at install time and can change between
@@ -42,9 +43,10 @@ that isn't at the pinned commit is kept, with a warning.
 
 To update a dependency, change its pin, re-run `./install.sh` (for testssl.sh or
 SecLists, delete `lib/testssl.sh` or `var/SecLists` first), and re-test. For
-SecLists, check that the file ADAPT reads (`default_password_file` in
-`var/configuration.json`, currently
-`Passwords/Common-Credentials/darkweb2017_top-100.txt`) still exists at the new
+SecLists, check that the files ADAPT reads (`default_username_file` and
+`default_password_file` in `var/configuration.json`, currently
+`Usernames/top-usernames-shortlist.txt` and
+`Passwords/Common-Credentials/darkweb2017_top-100.txt`) still exist at the new
 commit.
 
 The installer creates its files as your user. Re-running `./install.sh` is safe,

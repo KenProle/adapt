@@ -130,12 +130,21 @@ function check_python {
 # A venv avoids PEP 668 "externally-managed-environment" errors on current
 # distributions and keeps ADAPT's packages out of the system Python.
 function install_python_deps {
-	check_python python3
-	# A .venv made by an older Python can't install the pinned packages.
-	if [ -x "$launch_dir"/.venv/bin/python ] && ! python_ok "$launch_dir"/.venv/bin/python
+	# Checked here too in case apt has only just installed python3.
+	python_ok python3 || check_python python3
+	# .venv/bin/python is a symlink to the system python3, so ask pyvenv.cfg
+	# which Python built the venv. One built by another Python (an older one,
+	# or before a distro upgrade) has its packages in the wrong lib/pythonX.Y.
+	local venv_version system_version
+	system_version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+	if [ -d "$launch_dir"/.venv ]
 	then
-		echo "Existing .venv uses Python older than $MIN_PYTHON; recreating it."
-		do_command rm -rf "$launch_dir"/.venv
+		venv_version=$(sed -n 's/^version *= *\([0-9]*\.[0-9]*\).*/\1/p' "$launch_dir"/.venv/pyvenv.cfg 2>/dev/null)
+		if [ "$venv_version" != "$system_version" ]
+		then
+			echo "Existing .venv was built with Python ${venv_version:-unknown}, not $system_version; recreating it."
+			do_command rm -rf "$launch_dir"/.venv
+		fi
 	fi
 	echo -n "Creating Python virtual environment (.venv): "
 	if [ -x "$launch_dir"/.venv/bin/python ] || python3 -m venv "$launch_dir"/.venv
@@ -161,15 +170,16 @@ if [ "$(uname)" == "Darwin" ]; then
 echo "Installing for MacOSX"
 	install_python_deps
 elif [ "$(uname -s)" == "Linux" ]; then
-	sudo --validate # update sudo permissions, so we don't have to enter a passwd for the rest of the script
-	echo "Installing for Linux: "
-	echo "Please do not press anything until the script is finished, go take a break"
-	# Fail before apt and the large downloads if python3 is too old. (If
-	# python3 is missing, apt installs it below and install_python_deps checks.)
+	# Fail before the sudo prompt, apt and the large downloads if python3 is
+	# too old. (If python3 is missing, apt installs it below and
+	# install_python_deps checks it then.)
 	if command -v python3 &> /dev/null
 	then
 		check_python python3
 	fi
+	sudo --validate # update sudo permissions, so we don't have to enter a passwd for the rest of the script
+	echo "Installing for Linux: "
+	echo "Please do not press anything until the script is finished, go take a break"
 	do_command sudo apt-get update -y
 	do_command sudo apt-get install python3-venv python3-pip -y
 	do_command sudo apt-get install default-jre -y
