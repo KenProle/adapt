@@ -33,14 +33,29 @@ from urllib.parse import urlencode, urlsplit, parse_qs
 risk_conf = {"low", "medium", "high", "paranoid"}
 detail = {"low", "medium", "high", "full"}
 
-files = {"json", "xml", "stdout"}
+files = {"json", "xml"}
 
 on_off = {"on":True, "off":False}
 
 def config_error(val):
 	print(val)
 	print("Quitting")
-	sys.exit()
+	sys.exit(1)
+
+# Validates the output file in effect and returns its format. The file extension
+# selects the format (json or xml only), and append only works with a .json file.
+# Exits with status 1 on a bad combination. A None file means a timestamped file.
+def validate_output(filename, append, default_format="json"):
+	if(filename is None):
+		return default_format
+	ext = os.path.splitext(filename)[1].lstrip(".").lower()
+	if(ext == ""):
+		config_error("Output file '"+filename+"' has no extension; it selects the output format.\nPlease use a file name ending in one of: .json, .xml")
+	if(ext not in ("json", "xml")):
+		config_error("Unsupported output file format value: "+ext+"\nPlease use any from: ['json', 'xml']")
+	if(append and ext != "json"):
+		config_error("Appending only works with a .json output file; "+filename+" would be overwritten. Turn append off or use a .json file name.")
+	return ext
 
 def set_get(val, s, e):
 	if(val in s):
@@ -111,11 +126,13 @@ def get_config_defaults(contents):
 		contents["adapt_general"]["nmap_script_ports"] = number_list_verification(ast_op["nmap_script_ports"], "nmap script ports")
 
 	# Output options 
-	if(out_op["specific_filename"] == "none"):
+	# Validated in adapt.py after the command line overrides are applied
+	fname = out_op["specific_filename"].strip()
+	if(fname.lower() in ("", "none")):
 		contents["adapt_general"]["output_file"] = None
 	else:
-		contents["adapt_general"]["output_file"] = out_op["specific_filename"]
-	contents["adapt_general"]["output_format"] = set_get(out_op["filetype"], files, "json")
+		contents["adapt_general"]["output_file"] = fname
+	contents["adapt_general"]["output_format"] = set_get(out_op["filetype"].strip().lower(), files, "json")
 	contents["adapt_general"]["append"] = onf(out_op["append"])
 
 	# SSH options
@@ -200,7 +217,7 @@ def get_config_defaults(contents):
 				break
 		except:
 			print("Could not find available port for zap.")
-			sys.exit()
+			sys.exit(1)
 	contents["zap_general"]["port"] = p
 
 	return contents

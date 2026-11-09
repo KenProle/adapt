@@ -21,6 +21,7 @@
 #
 
 import os
+import shutil
 import sys
 import time
 
@@ -153,7 +154,7 @@ class PenTester():
 def get_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--target", type=str, help="Attack target specification")
-	parser.add_argument("--verbose", type=bool, nargs='?', help="Turns on verbose")
+	parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=None, help="Turn progress logging on (--verbose) or off (--no-verbose) for this run, overriding adapt_verbose in adapt.config")
 	parser.add_argument("--output", type=str, help="Output file specification")
 	parser.add_argument("--append", type=str, help="Append data to output file.")
 	parser.add_argument("--risk", type=str, help="Risk value specification: [low, medium, high, paranoid]")
@@ -167,16 +168,6 @@ def __unsupported_value(label, value, correct):
 	print("Unsupported "+label+" value: "+value)
 	print("Please use any from: "+str(correct))
 	sys.exit(1)
-
-def __format_from_filename(filename, supported):
-	ext = os.path.splitext(filename)[1].lstrip(".").lower()
-	if(ext == ""):
-		print("Output file '"+filename+"' has no extension; it selects the output format.")
-		print("Please use a file name ending in one of: "+", ".join("."+x for x in supported))
-		sys.exit(1)
-	if(ext not in supported):
-		__unsupported_value("output file format", ext, supported)
-	return ext
 
 def _host_key_fingerprint(key):
 	# Same form as `ssh-keygen -lf`: SHA256:<unpadded base64>
@@ -205,12 +196,13 @@ class _AcceptUnknownHostKey(paramiko.MissingHostKeyPolicy):
 		print("ADAPT: WARNING: accepting unverified SSH host key for {}: {} {}".format(
 			hostname, key.get_name(), _host_key_fingerprint(key)), file=sys.stderr)
 
-def _local_log_name(log_path):
-	# Local file name in ./tmp/ for a downloaded log: the remote file's base name
+def _local_log_name(log_path, index):
+	# Unique local file name for a downloaded log: the list position plus the
+	# remote file's base name. None if the path does not end in a file name.
 	name = log_path.split("/")[-1]
-	if(name in ("", ".", "..") or "." not in name):
+	if(name in ("", ".", "..")):
 		return None
-	return name
+	return "{}_{}".format(index, name)
 
 def ssh_connect(args, attempts=3):
 	# Returns a connected (SSHClient, SFTPClient). The server's host key is
@@ -304,27 +296,39 @@ def ssh_capture_dmesg_logs(args):
 	client, ftp_client = ssh_connect(args)
 
 	printer.aprint("Getting files...")
-	fetched = set()
-	for i in args["ssh_config"]["log_paths"]:
+	log_dir = "./tmp/ssh_logs/"
+	# Server logs can be sensitive: keep the download directory private
+	os.makedirs(log_dir, mode=0o700, exist_ok=True)
+	os.chmod(log_dir, 0o700)
+	fetched = []
+	seen_paths = set()
+	for index, i in enumerate(args["ssh_config"]["log_paths"]):
 
 		log_path = i
 		if(log_path == "apache2"):
 			log_path = "/var/log/http-error.log"
 		elif(log_path == "php"):
 			log_path = "/var/log/php-scripts.log"
-		filename = _local_log_name(log_path)
+		filename = _local_log_name(log_path, index)
 		if(filename is None):
-			print("ADAPT: SSH log path skipped (it must end in a file name with an extension): "+log_path, file=sys.stderr)
+			print("ADAPT: SSH log path skipped (it must end in a file name): "+log_path, file=sys.stderr)
 			continue
-		if(filename in fetched):
-			print("ADAPT: SSH log {} skipped: another log path also ends in {}".format(log_path, filename), file=sys.stderr)
+
+		if(log_path in seen_paths):
+			print("ADAPT: SSH log path skipped (already fetched): "+log_path, file=sys.stderr)
 			continue
-		fetched.add(filename)
+		seen_paths.add(log_path)
 
 		try:
-			ftp_client.get(log_path, "./tmp/"+filename)
-		except:
+			ftp_client.get(log_path, log_dir+filename)
+			fetched.append((log_path, log_dir+filename))
+		except Exception as e:
+			print("ADAPT: cannot get SSH log {}: {}".format(log_path, e), file=sys.stderr)
 			printer.aprint("SSH ERROR: cannot get file at location: "+log_path, 2)
+			try:
+				os.remove(log_dir+filename)
+			except OSError:
+				pass
 	printer.aprint("Done")
 	
 	try:
@@ -333,6 +337,7 @@ def ssh_capture_dmesg_logs(args):
 		client.close()
 	except:
 		pass
+	return fetched
 
 def main():
 	printer.aprint("Loading config file")
@@ -340,7 +345,7 @@ def main():
 		args = json.load(datafile)
 	datafile.close()
 
-	supported_file_formats = ["json", "xml", "stdout"]
+	supported_file_formats = ["json", "xml"]
 	supported_risk_conf_values = ["low", "medium", "high", "paranoid"]
 	supported_analysis_detail = ["low", "medium", "high", "full", "owasp10"]
 
@@ -348,21 +353,22 @@ def main():
 	command_line_args = get_args()
 	if(command_line_args.target != None):
 		args["adapt_general"]["target_name"] = command_line_args.target
-	if(command_line_args.verbose):
-		args["adapt_general"]["verbose"] = True
+	if(command_line_args.verbose is not None):
+		args["adapt_general"]["verbose"] = command_line_args.verbose
+		# the main printer was created from the config file before the arguments were read
+		printer.verbose = command_line_args.verbose
 	if(command_line_args.output != None and command_line_args.append != None):
 		print("Use either --output or --append, not both.")
 		sys.exit(1)
 	if(command_line_args.output != None):
 		args["adapt_general"]["output_file"] = command_line_args.output
-		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.output, ["json", "xml"])
 		# --output replaces the file, even if adapt.config sets append = on
 		args["adapt_general"]["append"] = False
 	if(command_line_args.append != None):
 		args["adapt_general"]["output_file"] = command_line_args.append
-		# get_results() can only append to JSON; XML would be overwritten
-		args["adapt_general"]["output_format"] = __format_from_filename(command_line_args.append, ["json"])
 		args["adapt_general"]["append"] = True
+	# Validate whichever output file is in effect (config or command line)
+	args["adapt_general"]["output_format"] = adapt_config_parser.validate_output(args["adapt_general"]["output_file"], args["adapt_general"]["append"], args["adapt_general"]["output_format"])
 
 	if(command_line_args.conf != None):
 		if(command_line_args.conf not in supported_risk_conf_values):
@@ -432,24 +438,29 @@ def main():
 			print("Fix the SSH settings in adapt.config, or set ssh_get_logs = off to scan without server logs.", file=sys.stderr)
 			sys.exit(1)
 
-	printer.aprint("Test bed setup starting...")
-	pentester = PenTester(args)
-	pentester.run()
-	printer.aprint("Test bed finished")
-	if( pentester.successful ):
-		if(args["ssh_config"]["turned_on"]):
-			try:
-				ssh_capture_dmesg_logs(args)
-			except Exception as e:
-				# Keep the scan results: write the report without the server logs
-				print("ADAPT: server logs not collected over SSH: "+str(e), file=sys.stderr)
-				printer.aprint(traceback.format_exc(), 2)
+	try:
+		printer.aprint("Test bed setup starting...")
+		pentester = PenTester(args)
+		pentester.run()
+		printer.aprint("Test bed finished")
+		if( pentester.successful ):
+			ssh_logs = []
+			if(args["ssh_config"]["turned_on"]):
+				try:
+					ssh_logs = ssh_capture_dmesg_logs(args)
+				except Exception as e:
+					# Keep the scan results: write the report without the server logs
+					print("ADAPT: server logs not collected over SSH: "+str(e), file=sys.stderr)
+					printer.aprint(traceback.format_exc(), 2)
 	
-		analysis = adapt_analysis( pentester.zap_results, pentester.owasp_results,args=args)
-		analysis.get_results()
-
-	for i in os.listdir("./tmp/"):
-		os.remove("./tmp/"+i)
+			analysis = adapt_analysis( pentester.zap_results, pentester.owasp_results,args=args, ssh_logs=ssh_logs)
+			analysis.get_results()
+	finally:
+		for i in os.listdir("./tmp/"):
+			if(os.path.isdir("./tmp/"+i)):
+				shutil.rmtree("./tmp/"+i)
+			else:
+				os.remove("./tmp/"+i)
 
 	return None
 
