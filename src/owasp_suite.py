@@ -365,7 +365,18 @@ class owasp_suite():
 
 		# nmap_results = "Found the following error pages: https://help.disqus.com/customer/portal/articles/466253-what-html-tags-are-allowed-within-comments-"
 		if "Found the following error pages" in nmap_results and not ignore_nmap :
-			urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', nmap_results)
+			# Only URLs from the error-pages section, and only on the target
+			# host: nmap's output has other URLs too (its banner links to
+			# https://nmap.org), and ADAPT must not fetch third-party sites.
+			section = nmap_results.split("Found the following error pages", 1)[1]
+			found = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', section)
+			urls = []
+			for u in found:
+				try:
+					if (urlparse(u).hostname == host and u not in urls):
+						urls.append(u)
+				except ValueError:
+					pass
 			comments = self.find_comments_in_html_by_urls(urls)
 			# One report per distinct comment, like the ZAP half, skipping
 			# (comment, url) pairs the ZAP half already reported
