@@ -61,6 +61,28 @@ Treat as security-sensitive and review closely:
 - Network code that talks to the target: the raw-socket CONNECT in `inpval_003`, `requests`/`urllib` calls, wig, and ZAP API calls.
 - Credentials and code loading: auth modules, how `zap_interface` imports the module named by `auth_module` in config, `//stdin` prompts, and the SSH/SFTP log retrieval in `adapt.py` (SSH password, host-key policy).
 
+## Third-party dependencies
+
+Where they are declared, and how they are pinned:
+- Python packages: `requirements.txt`, exact `==` pins (wig as a `git+https` URL pinned to a commit), installed by `install.sh` into `./.venv`. There is no lockfile; transitive packages are resolved by pip at install time.
+- Tools fetched by `install.sh`: `ZAP_VERSION`, `TESTSSL_COMMIT` and `SECLISTS_COMMIT` at the top of the script. apt packages and Java are not pinned.
+- Everything is pinned to the versions ADAPT was last tested with (Ubuntu 26.04 / Python 3.14 under WSL2), because upstream changes have broken ADAPT before. Bump deliberately, one dependency at a time unless they must move together, and re-test with a real run against DVWA before merging. Keep compatibility with Python 3.12+.
+- Changes to `install.sh` or to how dependencies are fetched are security-sensitive (see the review list above).
+
+Policy for adding, upgrading or removing a dependency:
+- Minimize third-party dependencies to reduce ongoing updates and maintenance. Prefer the Python standard library, supported platform APIs, or functionality already in the project when they meet the requirements.
+- Add a library only when its benefits justify its ongoing maintenance, security and upgrade costs. For simple, narrowly scoped functionality, consider a small local implementation when it is easier to maintain and verify. For security-sensitive functionality (cryptography, authentication, SSH, TLS, and complex parsing such as HTML/XML), use or keep established libraries or vetted platform APIs rather than hand-rolling replacements. Keep other specialized libraries (e.g. scipy, the ZAP client) when replacement would add security, correctness or maintenance risk.
+- Inspect the resolved transitive dependency tree (e.g. `pip install` into a scratch venv, then `pip list` and `pip show <pkg>`) before adding or upgrading a library. Prefer suitable options with fewer transitive dependencies, avoid large trees for functionality ADAPT barely uses, and explain any substantial increase and its update burden.
+- When changing existing dependency usage, identify unused or redundant libraries and unnecessary optional integrations as removal candidates. Remove them only within the authorized task scope and after checking code, dynamic imports (auth modules are loaded by name from config), configuration, `install.sh`, `doc/` and scripts under `lib/`. Preserve behavior and Python 3.12+ compatibility, verify the change, and explain justified retention.
+- Before adding or upgrading a library or tool, verify the exact package name, repository and publisher against the project's own documentation or repository, and check its registry entry (PyPI, GitHub releases) live. Do not trust registry metadata alone, and never take package names, versions or commit hashes from model memory. Investigate lookalike names, unexpected ownership or repository moves (testssl.sh has moved before), and unfamiliar new packages before proceeding.
+- Use the latest stable, supported release compatible with ADAPT. Scrutinize very recent releases and unexpected maintainer or release changes; absence of an advisory is not evidence that a release is safe. Explain any choice of an older release.
+- Check the license of the library and its transitive dependencies against ADAPT's Apache-2.0 license and how ADAPT is distributed. Preserve required notices and flag unclear or incompatible terms for the repo owner before proceeding.
+- Assess maintenance through support status, unresolved issues, security responsiveness and compatibility with supported Python versions. Release frequency is only one signal; a mature, stable library may need few releases. Reject archived, deprecated or abandoned projects.
+- Check current security advisories from official project sources and advisory databases (e.g. GitHub Advisory Database, OSV, PyPI). Report the sources and date checked, affected versions, and applicability to ADAPT. Avoid versions with known applicable vulnerabilities. If advisory lookup is unavailable, stop and report that before adding or upgrading; do not describe an unchecked version as vulnerability-free.
+- Keep updates scoped to the task. Let pip resolve transitive dependencies; avoid unrelated upgrades, forced overrides, or pinning a transitive package in `requirements.txt` just to bypass a constraint. Prefer a compatible parent-library update when a transitive dependency needs remediation.
+- Before updating, review release notes, migration guidance and dependency constraints for breaking changes (e.g. ZAP API changes, testssl.sh output format, SecLists file moves). Explain concrete effects on ADAPT and the migration work needed. If an update needs a broader migration or hits a compatibility blocker, stop and report the evidence and options before expanding scope. Do not repeatedly attempt speculative upgrades or fixes; resume only with new evidence or an agreed migration plan.
+- If you cannot verify these requirements, stop and report the blocker. Do not add or upgrade the dependency unless the repo owner explicitly accepts the identified risk.
+
 ## Gotchas
 
 - Code uses tabs for indentation.
