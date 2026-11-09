@@ -53,11 +53,12 @@ def __type_check(val, t):
 def wait_min(count):
 	sleep(count*60)
 
-def finite_or_none(x):
-	# A float for the JSON report, or None for inf/NaN (json.dump would write
-	# Infinity/NaN, which isn't valid JSON)
+def json_number(x):
+	# A float for the JSON report; inf/NaN become the strings "inf", "-inf" and
+	# "nan" (json.dump would write Infinity/NaN, which isn't valid JSON), so the
+	# sign of an infinite statistic is kept
 	x = float(x)
-	return x if math.isfinite(x) else None
+	return x if math.isfinite(x) else str(x)
 
 def create_report(name, basic_description="", severity="none", request="", confidence=1.0, misc=[], path="", cwe=None, related_cwes=[], preventions=[], owasp_association=None, error=False):
 
@@ -483,9 +484,9 @@ class owasp_suite():
 			cwe=521,
 			owasp_association="2",
 			misc=[
-				# null, not Infinity/NaN, which strict JSON parsers reject: the t
+				# not Infinity/NaN, which strict JSON parsers reject: the t
 				# statistic is infinite when both samples are constant but differ
-				{ "statistic": finite_or_none( res.statistic ), "pvalue": finite_or_none( res.pvalue ), "df": finite_or_none( res.df ) },
+				{ "statistic": json_number( res.statistic ), "pvalue": json_number( res.pvalue ), "df": json_number( res.df ) },
 				"{} v/i attempts with average rtt of {:.1f} ms".format( len( badpwd_rtts), avg_badpwd ),
 				"{} i/i attempts with average rtt of {:.1f} ms".format( len( badun_rtts), avg_badun )] ) )
 			
