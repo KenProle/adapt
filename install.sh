@@ -181,7 +181,10 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	echo "Installing for Linux: "
 	echo "Please do not press anything until the script is finished, go take a break"
 	do_command sudo apt-get update -y
-	do_command sudo apt-get install python3-venv python3-pip -y
+	# ADAPT uses the venv's own pip (from python3-venv), not the system pip.
+	# The C compiler and Python headers (which python3-pip used to pull in as
+	# Recommends) let pip build simple C extensions that have no prebuilt wheel.
+	do_command sudo apt-get install python3-venv build-essential python3-dev -y
 	do_command sudo apt-get install default-jre -y
 	do_command sudo apt-get install nmap -y
 	# testssl.sh needs dig/host; the package is bind9-dnsutils on current
