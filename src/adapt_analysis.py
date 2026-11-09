@@ -286,8 +286,11 @@ class adapt_analysis():
 		return final
 	def __owasp10_owasp(self, results):
 		ret = []
+		# position of each category ("1".."10") in ret
+		position = {}
 
 		for item in self.owasp_top10.keys():
+			position[item] = len(ret)
 			temp = {}
 			temp["name"] = self.owasp_top10[item]["name"]
 			temp["description"] = self.owasp_top10[item]["description"] 
@@ -298,9 +301,9 @@ class adapt_analysis():
 		for vuln in results:
 			for item in self.owasp_top10.keys():
 				if(vuln.cwe_num in self.owasp_top10[item]["relevant_cwes"]):
-					ret[int(item)]["findings"].append(vuln.get_full_report()) 
+					ret[position[item]]["findings"].append(vuln.get_full_report())
 				elif(vuln.owasp_association == item):
-					ret[int(item)]["findings"].append(vuln.get_full_report())
+					ret[position[item]]["findings"].append(vuln.get_full_report())
 		pops = []
 		for item in range(len(ret)):
 			if(len(ret[item]["findings"]) == 0):
