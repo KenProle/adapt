@@ -114,7 +114,7 @@ OWASP:
 	Only on/off options for each OWASP test. 
 
 DEBUG:
-	ADAPT_verbose : Turns terminal verbose on/off (recommended: on)
+	ADAPT_verbose : Turns terminal verbose on/off (recommended: on). --verbose or --no-verbose on the command line overrides it for one run.
 
 	zap_close : Closes zap after done testing on/off (recommended: on)
 
