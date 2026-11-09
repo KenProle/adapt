@@ -104,7 +104,7 @@ if [ "$1" == "clean" ]; then
 	exit 0
 fi
 
-# The pinned packages in requirements.txt (scipy in particular) need this.
+# The oldest Python ADAPT is tested with.
 MIN_PYTHON=3.12
 
 # Succeed if the given interpreter is at least MIN_PYTHON.
@@ -120,7 +120,7 @@ function check_python {
 		echo "FOUND ($("$1" -V 2>&1))"
 	else
 		echo "NOT FOUND ($("$1" -V 2>&1))"
-		echo "ADAPT's pinned Python packages need Python $MIN_PYTHON or newer."
+		echo "ADAPT needs Python $MIN_PYTHON or newer."
 		exit 1
 	fi
 }
