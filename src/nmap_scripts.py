@@ -20,7 +20,12 @@
 
 import subprocess
 import xml.etree.ElementTree as ET
+from urllib.parse import urlparse
 from pprint import pprint
+
+
+# Seconds the nmap scripts scan may take before it is stopped
+NMAP_TIMEOUT = 600
 
 
 def script_outputs(xml_text):
@@ -43,8 +48,13 @@ def run_nmap(host, arguments):
 	if not host or host.startswith("-"):
 		raise ValueError("invalid nmap target: %r" % host)
 	# stdin=DEVNULL: otherwise nmap reads keypresses from ADAPT's terminal
-	proc = subprocess.run(["nmap", "-oX", "-", host] + list(arguments),
-		stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	# A time limit: with -Pn, nmap no longer gives up on a host that drops
+	# packets, so a large port list could otherwise take very long
+	try:
+		proc = subprocess.run(["nmap", "-oX", "-", host] + list(arguments),
+			stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=NMAP_TIMEOUT)
+	except subprocess.TimeoutExpired:
+		raise RuntimeError("nmap did not finish within %d seconds" % NMAP_TIMEOUT)
 	xml_text = proc.stdout.decode("utf-8", "replace")
 	try:
 		ET.fromstring(xml_text)
@@ -52,28 +62,49 @@ def run_nmap(host, arguments):
 		raise RuntimeError("nmap failed (exit %d): %s" % (proc.returncode, proc.stderr.decode("utf-8", "replace").strip()))
 	return xml_text
 
-def translate_url(url):
-	if(url.startswith("https://")):
-		url = url[8:]
-	elif(url.startswith("http://")):
-		url = url[7:]
+def nmap_target(url):
+	"""The host and port nmap should scan for a target URL: the bare host name
+	(no scheme, port or path, which nmap can't resolve) and the URL's port, or
+	the scheme's default port. Raises ValueError for a URL nmap can't use."""
+	u = urlparse(url if "://" in url else "http://" + url)
+	host = u.hostname   # lower-case, without brackets around an IPv6 address
+	if not host or host.startswith("-"):
+		raise ValueError("invalid nmap target in %r" % url)
+	port = u.port or (443 if u.scheme == "https" else 80)
+	return host, port
 
-	url_parts = url.split("/")
 
-	if(url_parts[0].startswith("www.")):
-		url = url_parts[0][4:]
-	else:
-		url = url_parts[0]
+def nmap_path(url):
+	"""The target URL's path, for nmap scripts that take one (e.g.
+	http-methods.url-path), so they check the application rather than "/".
+	"/" if the path is empty or can't be passed safely in --script-args."""
+	path = urlparse(url if "://" in url else "http://" + url).path or "/"
+	if any(c in path for c in ',"\'={}\\') or any(c.isspace() for c in path):
+		return "/"
+	return path
 
-	return url
+
+def target_options(host):
+	"""nmap options every scan of the target needs. -Pn: skip host discovery,
+	since many hosts (e.g. Windows) drop ping, and nmap would then call the
+	host down and scan nothing; ZAP has just reached it, so it is up. -6 for
+	an IPv6 address."""
+	return ["-Pn"] + (["-6"] if ":" in host else [])
 
 class nmap_scripting():
 	def __init__(self, target, ports, scripts_to_run=None):
+		self.target, target_port = nmap_target(target)
+		self.path = nmap_path(target)
 		if(ports != None):
-			self.port_values = ["-p"+",".join(ports.split())]
+			# the configured ports plus the target's own port (e.g. 8080)
+			port_list = ports.split()
+			if(str(target_port) not in port_list):
+				port_list.append(str(target_port))
+			self.port_values = ["-p"+",".join(port_list)]
 		else:
+			# "all": nmap's default port list. The target's port can't be
+			# added here (with -p, nmap scans only the -p ports).
 			self.port_values = []
-		self.target = translate_url(target)
 		self.__valid_scripts = []
 		if(scripts_to_run is None):
 			# for current project goals only one script is run
@@ -152,8 +183,14 @@ class nmap_scripting():
 				self.__valid_scripts.append(i)
 
 	def run(self):
-		arguments = list(self.port_values)
+		arguments = target_options(self.target) + list(self.port_values)
+		# "+": run the script on the listed ports even when nmap doesn't
+		# recognise them as HTTP (e.g. an app on port 3000). Not with "all",
+		# where it would send HTTP probes to every open port (SSH, databases...)
+		force = "+" if self.port_values else ""
 		for script in self.__valid_scripts:
-			arguments += ["--script", script]
+			arguments += ["--script", force+script]
+		if("http-methods" in self.__valid_scripts):
+			arguments += ["--script-args", "http-methods.url-path="+self.path]
 		return script_outputs(run_nmap(self.target, arguments))
 
