@@ -72,6 +72,20 @@ class WelchTTestTest(unittest.TestCase):
 		self.assertEqual(r1.statistic, -r2.statistic)
 		self.assertEqual(r1.pvalue, r2.pvalue)
 
+	def test_constant_samples_of_different_lengths(self):
+		r = welch_ttest([0.1] * 7, [0.1] * 3)
+		self.assertTrue(math.isnan(r.pvalue))
+
+	def test_tiny_values_do_not_underflow(self):
+		r = welch_ttest([1e-90, 2e-90, 3e-90], [1e-90, 5e-90, 9e-90])
+		self.assertTrue(0.0 < r.pvalue < 1.0)
+		self.assertTrue(r.df > 0)
+
+	def test_huge_or_infinite_values(self):
+		for a, b in (([1e200, 3e200, 2e200], [1.0, 2.0, 3.0]), ([1.0, math.inf, -math.inf], [1.0, 2.0, 3.0]), ([math.nan, 1.0], [1.0, 2.0])):
+			with self.subTest(a=a):
+				self.assertTrue(math.isnan(welch_ttest(a, b).pvalue))
+
 	def test_betainc_known_values(self):
 		# I_x(a, 1) = x^a and I_x(1, b) = 1 - (1 - x)^b
 		for x in (0.01, 0.3, 0.5, 0.9, 0.999):

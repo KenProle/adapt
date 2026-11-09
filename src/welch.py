@@ -22,15 +22,16 @@
 #   p = I_x(df/2, 1/2)  with  x = df / (df + t^2)
 # I_x(a, b) is evaluated with its standard continued fraction (modified Lentz
 # method), using the symmetry I_x(a, b) = 1 - I_(1-x)(b, a) where that
-# converges faster. As scipy does, the result is NaN when either sample has
-# fewer than two values or both have zero variance.
+# converges faster. Edge cases (tiny samples, no variance) follow scipy; see
+# welch_ttest().
 
 import math
+import sys
 from collections import namedtuple
 
 WelchResult = namedtuple("WelchResult", ["statistic", "pvalue", "df"])
 
-_EPS = 1e-16
+_EPS = 4 * sys.float_info.epsilon
 _TINY = 1e-300
 _MAX_ITER = 10000
 
@@ -81,6 +82,8 @@ def betainc(a, b, x):
 
 def _mean_var(values):
 	n = len(values)
+	if all(v == values[0] for v in values):
+		return values[0], 0.0  # exactly constant, whatever the rounding
 	mean = math.fsum(values) / n
 	var = math.fsum((v - mean) ** 2 for v in values) / (n - 1)
 	return mean, var
@@ -93,7 +96,8 @@ def welch_ttest(a, b):
 	sample with one value gives NaN statistic and p-value; when neither
 	sample varies, different means give statistic +/-inf and p-value 0, and
 	equal means give NaN. scipy reports df as 1 wherever it would be
-	undefined, and so does this.
+	undefined, and so does this. Values too large to square, and infinite or
+	NaN values, give NaN for everything (scipy returns inf or NaN there).
 	"""
 	a = [float(v) for v in a]
 	b = [float(v) for v in b]
@@ -102,8 +106,13 @@ def welch_ttest(a, b):
 		return WelchResult(math.nan, math.nan, math.nan)
 	if n1 < 2 or n2 < 2:
 		return WelchResult(math.nan, math.nan, 1.0)
-	m1, v1 = _mean_var(a)
-	m2, v2 = _mean_var(b)
+	if not all(math.isfinite(v) for v in a + b):
+		return WelchResult(math.nan, math.nan, math.nan)
+	try:
+		m1, v1 = _mean_var(a)
+		m2, v2 = _mean_var(b)
+	except OverflowError:
+		return WelchResult(math.nan, math.nan, math.nan)
 	s1, s2 = v1 / n1, v2 / n2
 	se2 = s1 + s2
 	diff = m1 - m2
@@ -112,7 +121,10 @@ def welch_ttest(a, b):
 			return WelchResult(math.nan, math.nan, 1.0)
 		return WelchResult(math.copysign(math.inf, diff), 0.0, 1.0)
 	statistic = diff / math.sqrt(se2)
-	df = se2 * se2 / (s1 * s1 / (n1 - 1) + s2 * s2 / (n2 - 1))
+	# Welch-Satterthwaite, with each term scaled by se2 so tiny values can't
+	# underflow to 0/0
+	r1, r2 = s1 / se2, s2 / se2
+	df = 1.0 / (r1 * r1 / (n1 - 1) + r2 * r2 / (n2 - 1))
 	t2 = statistic * statistic
 	pvalue = betainc(df / 2.0, 0.5, df / (df + t2))
 	return WelchResult(statistic, min(pvalue, 1.0), df)

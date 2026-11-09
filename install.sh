@@ -104,7 +104,7 @@ if [ "$1" == "clean" ]; then
 	exit 0
 fi
 
-# The oldest Python ADAPT is tested with.
+# The minimum supported Python version.
 MIN_PYTHON=3.12
 
 # Succeed if the given interpreter is at least MIN_PYTHON.
