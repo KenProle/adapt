@@ -17,9 +17,10 @@
 # Writes ADAPT's results (JSON-like data: dicts, lists, tuples, str, int,
 # float, bool, None) as XML for --output *.xml.
 #
-# The format matches what the dicttoxml package (1.7.16, called with
-# attr_type=False) produced before it was replaced, so existing consumers of
-# ADAPT's XML see no change, including its quirks:
+# For the data ADAPT produces, the output is byte-for-byte what the dicttoxml
+# package (1.7.16, called with attr_type=False) produced before it was
+# replaced, so existing consumers of ADAPT's XML see no change, including its
+# quirks:
 # - <?xml version="1.0" encoding="UTF-8" ?> then a <root> element;
 # - list entries are <item> elements, and a list directly inside a list is
 #   written as <item > (with a space);
@@ -28,7 +29,11 @@
 #   written with isoformat(); any other iterable is written like a list;
 # - a dict key that isn't a valid XML name becomes n<key> if it is a number,
 #   gets spaces turned into underscores if that makes it valid, or else is
-#   written as <key name="...">.
+#   written as <key name="...">. For a value that is text, a number, a bool or
+#   None, a fixed-up name that still isn't valid (e.g. n1e+20) also becomes
+#   <key name="...">.
+# (One deliberate difference: str subclasses are written as text, where
+# dicttoxml wrote them one character per <item>. ADAPT never produces them.)
 
 import numbers
 from collections.abc import Iterable
@@ -45,7 +50,7 @@ def _escape(text):
 @lru_cache(maxsize=None)
 def _is_xml_name(name):
 	try:
-		parseString('<?xml version="1.0" encoding="UTF-8" ?><%s>foo</%s>' % (name, name))
+		parseString("<%s></%s>" % (name, name))
 		return True
 	except Exception:
 		return False
@@ -68,6 +73,14 @@ def _element_name(key):
 	return "key", ' name="%s"' % key
 
 
+def _checked(name, attrs):
+	"""Element name for a text, number, bool or None value: a fixed-up name that
+	is still not a valid XML name moves into a name attribute."""
+	if attrs or _is_xml_name(name):
+		return name, attrs
+	return "key", ' name="%s"' % name
+
+
 def _text(value):
 	if isinstance(value, str):
 		return _escape(value)
@@ -87,16 +100,20 @@ def _dict(obj):
 	for key, value in obj.items():
 		name, attrs = _element_name(key)
 		if isinstance(value, bool):
+			name, attrs = _checked(name, attrs)
 			out.append("<%s%s>%s</%s>" % (name, attrs, str(value).lower(), name))
 		elif _is_scalar(value):
+			name, attrs = _checked(name, attrs)
 			out.append("<%s%s>%s</%s>" % (name, attrs, _text(value), name))
 		elif hasattr(value, "isoformat"):
+			name, attrs = _checked(name, attrs)
 			out.append("<%s%s>%s</%s>" % (name, attrs, _escape(value.isoformat()), name))
 		elif isinstance(value, dict):
 			out.append("<%s%s>%s</%s>" % (name, attrs, _dict(value), name))
 		elif _is_list(value):
 			out.append("<%s%s>%s</%s>" % (name, attrs, _list(value), name))
 		elif value is None:
+			name, attrs = _checked(name, attrs)
 			out.append("<%s%s></%s>" % (name, attrs, name))
 		else:
 			raise TypeError("Unsupported data type: %s (%s)" % (value, type(value).__name__))
