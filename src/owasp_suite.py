@@ -20,7 +20,7 @@
 
 try:
 	import re, subprocess, time, urllib.request, requests, random, copy, os
-	import scipy.stats as stats
+	from welch import welch_ttest
 	import itertools, os, errno, json, signal, socket, ssl, sys, traceback
 	from aprint import aprint
 	from urllib.parse import urlparse
@@ -232,7 +232,7 @@ class owasp_suite():
 		try:
 			messages = self.zap.spider_messages()
 		except Exception as e:
-			# spider not run (no spider id) or ZAP error: nothing to report from ZAP
+			# ZAP error: nothing to report from ZAP
 			self.printer.aprint("config_002: could not get spider messages: "+str(e), 1)
 			return report_list
 
@@ -283,6 +283,11 @@ class owasp_suite():
 		conf = 1.0
 
 		# comments in zap urls
+		if(not self.args["zap_general"]["spider_turned_on"]):
+			# only the nmap half runs: say so, so the result can't look complete
+			msg = "config_002 partly skipped: HTML comments from ZAP's pages need the ZAP spider (spider_scan = on)"
+			print("ADAPT: "+msg, file=sys.stderr)
+			report_list.append(create_report("config_002", "SKIPPED: "+msg, error=True))
 		temp = self.generate_comment_reports_by_msgs()
 		if ( temp ):
 			report_list = report_list + temp
@@ -379,7 +384,7 @@ class owasp_suite():
 		# get diffs for invalid logins
 		badun_bodys = [re.sub( bad_uname, "", str(msg['responseBody'])) for msg in badun_msgs ]
 		test_diffs = [ SequenceMatcher( None, b1, b2 ).ratio() for b1,b2 in zip( badpwd_bodys1, badun_bodys ) ]
-		res = stats.ttest_ind( baseline_diffs, test_diffs, equal_var=False )
+		res = welch_ttest( baseline_diffs, test_diffs )
 
 		if( res.pvalue < 0.05 ):
 			reports.append( create_report( 'ident_004', basic_description="Response difference between valid and invalid usernames on login page", severity='low', request='', confidence=1.0, path=self.unstripped_target ) )
@@ -390,7 +395,7 @@ class owasp_suite():
 
 		badun_rtts =  [ float(msg['rtt']) for msg in badun_msgs ]
 		avg_badun = sum( badun_rtts ) / len( badun_rtts )
-		res = stats.ttest_ind( badpwd_rtts, badun_rtts, equal_var=False )
+		res = welch_ttest( badpwd_rtts, badun_rtts )
 		if( max( badpwd_rtts + badun_rtts ) < 1.0 ):
 			# Almost certainly an auth module returning seconds, not milliseconds
 			print("ADAPT: ident_004: every login rtt is under 1 ms; check that the auth module returns rtt in milliseconds", file=sys.stderr)
@@ -411,9 +416,7 @@ class owasp_suite():
 			cwe=521,
 			owasp_association="2",
 			misc=[
-				# plain floats: scipy's result object is not JSON serialisable
-				# (df only exists from scipy 1.11)
-				{ "statistic": float( res.statistic ), "pvalue": float( res.pvalue ), "df": float( res.df ) if hasattr( res, "df" ) else None },
+				{ "statistic": float( res.statistic ), "pvalue": float( res.pvalue ), "df": float( res.df ) },
 				"{} v/i attempts with average rtt of {:.1f} ms".format( len( badpwd_rtts), avg_badpwd ),
 				"{} i/i attempts with average rtt of {:.1f} ms".format( len( badun_rtts), avg_badun )] ) )
 			
@@ -504,6 +507,7 @@ class owasp_suite():
 		report_list = []
 		results = []
 		errors = 0
+		answered = []   # (method, status, request, body) of non-CONNECT methods that got a 2xx
 
 		# get and post are standardized, there is no error if they give a page
 		# BLAH is not a real http verb. This makes some web servers give interesting errors
@@ -519,7 +523,8 @@ class owasp_suite():
 					# settings don't apply and it isn't in ZAP's history.
 					req, resp = self.__raw_connect()
 				else:
-					req = "{} {}/ HTTP/1.0\r\n\r\n".format(m, self.unstripped_target)
+					# Content-Length: 0, or servers answer a body-less PUT/PATCH with 411/400
+					req = "{} {}/ HTTP/1.0\r\nContent-Length: 0\r\n\r\n".format(m, self.unstripped_target.rstrip("/"))
 					resp = self.zap.send_request( req )
 				status = int(resp["responseHeader"].split()[1])
 			except Exception as e:
@@ -529,25 +534,40 @@ class owasp_suite():
 				continue
 
 			results.append("{}: HTTP {}".format(m, status))
-			html = str(resp['responseBody'])
+			accepted = 200 <= status < 300
 			if(m == "CONNECT"):
-				if(200 <= status < 300):
+				if(accepted):
 					# A 2xx alone doesn't prove a working tunnel (some frameworks
 					# answer every method with 200), hence the lower confidence.
 					report_list.append(create_report("inpval_003", "Server answered CONNECT with HTTP {}; it may act as an open proxy/tunnel (not verified).".format(status), severity="medium", request=req, cwe=441, owasp_association="6", confidence=0.5))
 				continue
-			if(status == 200):
-				report_list.append(create_report("inpval_003", "Valid response from potentially vulnerable verbs.", severity="low", request=req, confidence=1.0))
-				if( html ):
-					soup = BeautifulSoup( html, 'html.parser' )
-					if( soup.html ):
-						msg = "Received unexpected HTML in response on uncommon HTTP methods"
-						# misc is a truncated version of the page
-						misc = str( soup.html )
-						if( len( misc ) > 100 ):
-							misc = misc[:97] + "..."
-						report = create_report("inpval_003", msg, severity="low", request=req, cwe=285, confidence=1.0, misc=[misc])
-						report_list.append( report )
+			if(accepted):
+				answered.append((m, status, req, str(resp['responseBody'])))
+
+		# BLAH is not a real method: if it gets a 2xx too, the server answers any
+		# method alike, so a 2xx says little about what the others actually did.
+		catch_all = any(m == "BLAH" for m, _, _, _ in answered)
+		for m, status, req, html in answered:
+			if(m == "BLAH"):
+				report_list.append(create_report("inpval_003", "Server accepts an invented HTTP method (BLAH answered HTTP {}); 2xx answers to other methods may not mean they are supported.".format(status), severity="low", request=req, cwe=650, owasp_association="6", confidence=1.0))
+				continue
+			# any 2xx: e.g. 201 Created or 204 No Content to PUT/DELETE means the
+			# method was accepted; PUT and DELETE can change content on the server
+			sev = "medium" if m in ("PUT", "DELETE") else "low"
+			desc = "{} accepted (HTTP {}): valid response from a potentially vulnerable verb.".format(m, status)
+			if(catch_all):
+				desc += " The server also accepts invented methods, so this may not mean {} is supported.".format(m)
+			report_list.append(create_report("inpval_003", desc, severity=sev, request=req, cwe=650, owasp_association="6", confidence=0.5 if catch_all else 1.0))
+			if( html ):
+				soup = BeautifulSoup( html, 'html.parser' )
+				if( soup.html ):
+					msg = "Received unexpected HTML in response to {}".format(m)
+					# misc is a truncated version of the page
+					misc = str( soup.html )
+					if( len( misc ) > 100 ):
+						misc = misc[:97] + "..."
+					report = create_report("inpval_003", msg, severity="low", request=req, cwe=285, confidence=1.0, misc=[misc])
+					report_list.append( report )
 
 		# Always record what each verb got back, including the ones that could not be sent
 		desc = "HTTP verb tampering: response status per method"
@@ -687,6 +707,11 @@ class owasp_suite():
 	
 	# this is also handled by zap
 	def err_002(self):
+		if(not self.args["zap_general"]["spider_turned_on"]):
+			# It sends its error-provoking requests to the pages the spider found
+			msg = "err_002 skipped: it needs the ZAP spider (spider_scan = on)"
+			print("ADAPT: "+msg, file=sys.stderr)
+			return [create_report("err_002", "SKIPPED: "+msg, error=True)]
 		# Trying to run test cases to produce stack traces
 		err = error_suite(self.args, self.zap)
 		reports = err.run()

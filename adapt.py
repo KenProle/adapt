@@ -146,7 +146,7 @@ class PenTester():
 def get_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--target", type=str, help="Attack target specification")
-	parser.add_argument("--verbose", type=bool, nargs='?', help="Turns on verbose")
+	parser.add_argument("--verbose", action=argparse.BooleanOptionalAction, default=None, help="Turn progress logging on (--verbose) or off (--no-verbose) for this run, overriding adapt_verbose in adapt.config")
 	parser.add_argument("--output", type=str, help="Output file specification")
 	parser.add_argument("--append", type=str, help="Append data to output file.")
 	parser.add_argument("--risk", type=str, help="Risk value specification: [low, medium, high, paranoid]")
@@ -331,8 +331,10 @@ def main():
 	command_line_args = get_args()
 	if(command_line_args.target != None):
 		args["adapt_general"]["target_name"] = command_line_args.target
-	if(command_line_args.verbose):
-		args["adapt_general"]["verbose"] = True
+	if(command_line_args.verbose is not None):
+		args["adapt_general"]["verbose"] = command_line_args.verbose
+		# the main printer was created from the config file before the arguments were read
+		printer.verbose = command_line_args.verbose
 	if(command_line_args.output != None and command_line_args.append != None):
 		print("Use either --output or --append, not both.")
 		sys.exit(1)
