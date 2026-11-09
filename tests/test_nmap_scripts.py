@@ -24,7 +24,7 @@ from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
 import nmap_scripts
-from nmap_scripts import nmap_scripting, nmap_target, run_nmap, script_outputs
+from nmap_scripts import nmap_scripting, nmap_path, nmap_target, run_nmap, script_outputs
 
 # Trimmed from real `nmap -oX -` output.
 XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -93,12 +93,12 @@ class NmapScriptingTest(unittest.TestCase):
 	def test_run_builds_arguments(self):
 		# the host is kept as given (www. is part of it), -Pn skips ping
 		self.assertEqual(self.run_args("http://www.example.test/app", "80 443"),
-			("www.example.test", ["-Pn", "-p80,443", "--script", "http-methods"]))
+			("www.example.test", ["-Pn", "-p80,443", "--script", "http-methods", "--script-args", "http-methods.url-path=/app"]))
 
 	def test_target_port_is_scanned(self):
 		# "host:8080/path" isn't a host nmap can resolve (#81): scan host, port 8080
 		self.assertEqual(self.run_args("http://192.0.2.1:8080/insecure-bank", "80"),
-			("192.0.2.1", ["-Pn", "-p80,8080", "--script", "http-methods"]))
+			("192.0.2.1", ["-Pn", "-p80,8080", "--script", "http-methods", "--script-args", "http-methods.url-path=/insecure-bank"]))
 
 	def test_target_port_not_repeated(self):
 		self.assertEqual(self.run_args("https://example.test/", "80 443")[1][1], "-p80,443")
@@ -113,7 +113,7 @@ class NmapScriptingTest(unittest.TestCase):
 
 	def test_ipv6(self):
 		self.assertEqual(self.run_args("http://[2001:db8::1]:8080/", "80"),
-			("2001:db8::1", ["-Pn", "-6", "-p80,8080", "--script", "http-methods"]))
+			("2001:db8::1", ["-Pn", "-6", "-p80,8080", "--script", "http-methods", "--script-args", "http-methods.url-path=/"]))
 
 
 class NmapTargetTest(unittest.TestCase):
@@ -121,6 +121,13 @@ class NmapTargetTest(unittest.TestCase):
 		self.assertEqual(nmap_target("http://Example.test:8080/a?b"), ("example.test", 8080))
 		self.assertEqual(nmap_target("https://example.test"), ("example.test", 443))
 		self.assertEqual(nmap_target("example.test/x"), ("example.test", 80))
+
+	def test_paths(self):
+		self.assertEqual(nmap_path("http://example.test:8080/insecure-bank"), "/insecure-bank")
+		self.assertEqual(nmap_path("http://example.test"), "/")
+		# characters that would break --script-args fall back to "/"
+		self.assertEqual(nmap_path("http://example.test/a,b"), "/")
+		self.assertEqual(nmap_path("http://example.test/a%20b"), "/a%20b")
 
 	def test_rejects_unusable_targets(self):
 		for url in ("http://-iLfoo/", "http:///path", "http://example.test:99999/"):

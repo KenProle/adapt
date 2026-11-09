@@ -65,6 +65,16 @@ def nmap_target(url):
 	return host, port
 
 
+def nmap_path(url):
+	"""The target URL's path, for nmap scripts that take one (e.g.
+	http-methods.url-path), so they check the application rather than "/".
+	"/" if the path is empty or can't be passed safely in --script-args."""
+	path = urlparse(url if "://" in url else "http://" + url).path or "/"
+	if any(c in path for c in ',"={}') or any(c.isspace() for c in path):
+		return "/"
+	return path
+
+
 def target_options(host):
 	"""nmap options every scan of the target needs. -Pn: skip host discovery,
 	since many hosts (e.g. Windows) drop ping, and nmap would then call the
@@ -75,6 +85,7 @@ def target_options(host):
 class nmap_scripting():
 	def __init__(self, target, ports, scripts_to_run=None):
 		self.target, target_port = nmap_target(target)
+		self.path = nmap_path(target)
 		if(ports != None):
 			# the configured ports plus the target's own port (e.g. 8080)
 			port_list = ports.split()
@@ -164,5 +175,7 @@ class nmap_scripting():
 		arguments = target_options(self.target) + list(self.port_values)
 		for script in self.__valid_scripts:
 			arguments += ["--script", script]
+		if("http-methods" in self.__valid_scripts):
+			arguments += ["--script-args", "http-methods.url-path="+self.path]
 		return script_outputs(run_nmap(self.target, arguments))
 

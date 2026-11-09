@@ -37,7 +37,7 @@ try:
 	from timeit import default_timer
 	from error import error_suite
 	from time import sleep
-	from nmap_scripts import nmap_scripting, nmap_target, target_options
+	from nmap_scripts import nmap_scripting, nmap_target, nmap_path, target_options
 except Exception as e:
 	import sys
 	print("Cannot import module: "+str(e)+". Quitting...")
@@ -336,10 +336,10 @@ class owasp_suite():
 			# The bare host and the target's own port: nmap can't resolve
 			# "host:port/path", and its default ports may not include the target's
 			host, port = nmap_target(self.unstripped_target)
-			cmd = ["nmap"] + target_options(host) + ["-p", str(port), "--script", "http-errors"]
+			script_args = "httpspider.url="+nmap_path(self.unstripped_target)
 			if (self.nmap_crawl_size != None):
-				cmd += ["--script-args", "httpspider.maxpagecount="+self.nmap_crawl_size]
-			cmd.append(host)
+				script_args += ",httpspider.maxpagecount="+self.nmap_crawl_size
+			cmd = ["nmap"] + target_options(host) + ["-p", str(port), "--script", "http-errors", "--script-args", script_args, host]
 			# Own session, so a timeout can kill nmap and anything it spawned
 			p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 			(out, err) = p.communicate(None, timeout=90)
