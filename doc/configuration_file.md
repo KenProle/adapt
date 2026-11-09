@@ -55,8 +55,8 @@ ADAPT:
 
 OUTPUT:
 	filetype : output will be either json or xml (recommended: json)
-	specific_filename : This will save output to this file. This will supercede filetype. 
-	append : similar to specific filename but it appends to data file instead of overwrite. 
+	specific_filename : This will save output to this file (none, or empty, means a timestamped file in ./output). The file extension (.json or .xml) selects the output format and supercedes filetype.
+	append : similar to specific filename but it appends to data file instead of overwrite. Appending only works with a .json file; append = on with an .xml file is rejected.
 
 SSH:
 	ssh_get_logs : This turns ssh log capture on/off
@@ -115,7 +115,7 @@ OWASP:
 	Only on/off options for each OWASP test. 
 
 DEBUG:
-	ADAPT_verbose : Turns terminal verbose on/off (recommended: on)
+	ADAPT_verbose : Turns terminal verbose on/off (recommended: on). --verbose or --no-verbose on the command line overrides it for one run.
 
 	zap_close : Closes zap after done testing on/off (recommended: on)
 

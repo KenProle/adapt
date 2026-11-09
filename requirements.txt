@@ -1,11 +1,11 @@
 # Python dependencies for ADAPT. install.sh installs these into ./.venv.
-beautifulsoup4
-dicttoxml
-lxml
-paramiko
-progressbar2
-python-nmap
-requests
-scipy
-zaproxy
-wig @ git+https://github.com/jekyc/wig
+# Pinned to the versions ADAPT was last tested with (Ubuntu 26.04, Python 3.14),
+# so a new release of one of these packages can't change ADAPT's behaviour
+# unnoticed. Only these direct dependencies are pinned: the packages they depend
+# on are resolved by pip at install time and may be newer on a fresh install.
+# Bump the pins deliberately and re-test. Needs Python 3.12+.
+beautifulsoup4==4.15.0
+paramiko==5.1.0
+requests==2.34.2
+zaproxy==0.6.0
+wig @ git+https://github.com/jekyc/wig@d5ddd919a75c82c8107cc0440008b0303a8fee8a
