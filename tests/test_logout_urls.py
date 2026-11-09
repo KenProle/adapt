@@ -36,7 +36,7 @@ class LogoutUrlsTest(unittest.TestCase):
 	# ZAP matches context exclusions against the whole URL (Java regex; the
 	# features used behave the same in Python's re)
 	def excluded(self, url, context="http://h"):
-		return re.fullmatch(zap_interface.logout_exclusion(context), url) is not None
+		return any(re.fullmatch(p, url) for p in zap_interface.logout_exclusions(context))
 
 	def test_logout_links_are_excluded(self):
 		self.assertTrue(self.excluded("http://h:8080/insecure-bank/j_spring_security_logout",
@@ -45,14 +45,18 @@ class LogoutUrlsTest(unittest.TestCase):
 				"http://h/logoff", "http://h/auth/log_out", "http://h/LOGOUT.do",
 				"http://h/doLogout.action", "http://h/userLogout", "http://h/performLogOff",
 				"http://h/account/signOut", "http://h/signoff", "http://h/sign-off",
-				"http://h/logoutUser", "http://h/logout?next=/home"):
+				"http://h/logoutUser", "http://h/logout?next=/home",
+				# a logout word as a query parameter's name or value
+				"http://h/a?action=logout", "http://h/index.php?do=logout",
+				"http://h/wp-login.php?action=logout&_wpnonce=abc", "http://h/a?logout=1",
+				"http://h/a?x=1&action=LogOff", "http://h/login?logout"):
 			self.assertTrue(self.excluded(url), url)
 
 	def test_other_pages_are_not(self):
 		for url in ("http://h/dashboard", "http://h/catalog/blogoffers", "http://h/blog/outline",
 				"http://h/dialogout", "http://h/login", "http://h/log_output.jsp",
 				"http://h/log-outage", "http://h/list?log_offset=10", "http://h/sign-outlet",
-				"http://h/login?logout", "http://h/a?next=/logout"):
+				"http://h/a?next=/logout", "http://h/a?q=logouts"):
 			self.assertFalse(self.excluded(url), url)
 
 	def test_only_under_the_context(self):
