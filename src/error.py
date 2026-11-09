@@ -33,7 +33,7 @@ determine specific details about the application.
 '''
 import re
 from httpparser.httprequest import HTTPRequest
-import progressbar
+from progress import ProgressBar
 
 class error_suite():
 	#
@@ -89,7 +89,7 @@ class error_suite():
 	def run(self):
 		report_list = []
 		if self.zapper.spider_messages() != None:
-			bar = progressbar.ProgressBar(maxval=len(self.zapper.spider_messages()), widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
+			bar = ProgressBar(maxval=len(self.zapper.spider_messages()))
 			if(self.args["adapt_general"]["verbose"]):bar.start()
 			#for zapmsg in self.zapper.spider_messages():
 			messages = self.zapper.spider_messages()

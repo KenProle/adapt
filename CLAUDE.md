@@ -17,7 +17,7 @@ All commands must be run from the repo root: every module resolves paths via `os
 - Test an auth module standalone: `python3 login_format.py` (calls `service_auth("admin","password")` and prints the result).
 - Vulnerable test target: `lib/dvwa/setup-dvwa.sh` starts a DVWA docker container (default creds admin/password; the user must be in the `docker` group). `login_format.py` is written for DVWA.
 
-There is no test suite, linter or build step.
+Unit tests for small local modules live in `tests/` (standard-library `unittest`): `python3 -m unittest discover tests`. Most behaviour is only checked by a real scan (against DVWA or another target); there is no linter or build step.
 
 ## Configuration flow
 
