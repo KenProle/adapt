@@ -19,7 +19,7 @@
 #
 
 import json, datetime, csv, os, pathlib, time, tempfile
-from dicttoxml import dicttoxml
+from xml_output import to_xml
 
 _PARANOID_VALUE = -1.0
 _LOW_VALUE = 0.25
@@ -119,7 +119,6 @@ class adapt_analysis():
 		self.output_format = self.__check_output_format(self.args["adapt_general"]["output_format"])
 		tm = datetime.datetime.now()
 		self.output_file = self.args["adapt_general"]["output_file"]
-		self.output_format = self.args["adapt_general"]["output_format"]
 		backup_name = "adaptOut_{}_{}{}".format(tm.day, tm.hour, tm.minute)
 		if(self.output_file == None):
 			self.output_file = "./output/"+backup_name+".{}".format(self.output_format)
@@ -286,8 +285,11 @@ class adapt_analysis():
 		return final
 	def __owasp10_owasp(self, results):
 		ret = []
+		# position of each category ("1".."10") in ret
+		position = {}
 
 		for item in self.owasp_top10.keys():
+			position[item] = len(ret)
 			temp = {}
 			temp["name"] = self.owasp_top10[item]["name"]
 			temp["description"] = self.owasp_top10[item]["description"] 
@@ -298,9 +300,9 @@ class adapt_analysis():
 		for vuln in results:
 			for item in self.owasp_top10.keys():
 				if(vuln.cwe_num in self.owasp_top10[item]["relevant_cwes"]):
-					ret[int(item)]["findings"].append(vuln.get_full_report()) 
+					ret[position[item]]["findings"].append(vuln.get_full_report())
 				elif(vuln.owasp_association == item):
-					ret[int(item)]["findings"].append(vuln.get_full_report())
+					ret[position[item]]["findings"].append(vuln.get_full_report())
 		pops = []
 		for item in range(len(ret)):
 			if(len(ret[item]["findings"]) == 0):
@@ -347,7 +349,7 @@ class adapt_analysis():
 		try:
 			pathlib.Path('./output/').mkdir(parents=True, exist_ok=True)
 			if(self.output_format == "xml"):
-				xml = dicttoxml(self.final_results, attr_type=False)
+				xml = to_xml(self.final_results)
 				with open(self.output_file, "wb") as f:
 					f.write(xml)
 			else:
