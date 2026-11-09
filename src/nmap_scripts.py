@@ -24,6 +24,10 @@ from urllib.parse import urlparse
 from pprint import pprint
 
 
+# Seconds the nmap scripts scan may take before it is stopped
+NMAP_TIMEOUT = 600
+
+
 def script_outputs(xml_text):
 	"""From nmap's XML output (-oX), return one {script id: output} dict per
 	port that has script results, in the order nmap lists them. This is the
@@ -44,8 +48,13 @@ def run_nmap(host, arguments):
 	if not host or host.startswith("-"):
 		raise ValueError("invalid nmap target: %r" % host)
 	# stdin=DEVNULL: otherwise nmap reads keypresses from ADAPT's terminal
-	proc = subprocess.run(["nmap", "-oX", "-", host] + list(arguments),
-		stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	# A time limit: with -Pn, nmap no longer gives up on a host that drops
+	# packets, so a large port list could otherwise take very long
+	try:
+		proc = subprocess.run(["nmap", "-oX", "-", host] + list(arguments),
+			stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=NMAP_TIMEOUT)
+	except subprocess.TimeoutExpired:
+		raise RuntimeError("nmap did not finish within %d seconds" % NMAP_TIMEOUT)
 	xml_text = proc.stdout.decode("utf-8", "replace")
 	try:
 		ET.fromstring(xml_text)
@@ -70,7 +79,7 @@ def nmap_path(url):
 	http-methods.url-path), so they check the application rather than "/".
 	"/" if the path is empty or can't be passed safely in --script-args."""
 	path = urlparse(url if "://" in url else "http://" + url).path or "/"
-	if any(c in path for c in ',"={}') or any(c.isspace() for c in path):
+	if any(c in path for c in ',"\'={}\\') or any(c.isspace() for c in path):
 		return "/"
 	return path
 
@@ -93,7 +102,9 @@ class nmap_scripting():
 				port_list.append(str(target_port))
 			self.port_values = ["-p"+",".join(port_list)]
 		else:
-			self.port_values = []   # "all": nmap's default port list
+			# "all": nmap's default port list. The target's port can't be
+			# added here (with -p, nmap scans only the -p ports).
+			self.port_values = []
 		self.__valid_scripts = []
 		if(scripts_to_run is None):
 			# for current project goals only one script is run
@@ -174,7 +185,9 @@ class nmap_scripting():
 	def run(self):
 		arguments = target_options(self.target) + list(self.port_values)
 		for script in self.__valid_scripts:
-			arguments += ["--script", script]
+			# "+": run the script on the scanned ports even when nmap doesn't
+			# recognise them as HTTP (e.g. an app on port 3000)
+			arguments += ["--script", "+"+script]
 		if("http-methods" in self.__valid_scripts):
 			arguments += ["--script-args", "http-methods.url-path="+self.path]
 		return script_outputs(run_nmap(self.target, arguments))

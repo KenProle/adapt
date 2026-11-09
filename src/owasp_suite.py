@@ -339,7 +339,7 @@ class owasp_suite():
 			script_args = "httpspider.url="+nmap_path(self.unstripped_target)
 			if (self.nmap_crawl_size != None):
 				script_args += ",httpspider.maxpagecount="+self.nmap_crawl_size
-			cmd = ["nmap"] + target_options(host) + ["-p", str(port), "--script", "http-errors", "--script-args", script_args, host]
+			cmd = ["nmap"] + target_options(host) + ["-p", str(port), "--script", "+http-errors", "--script-args", script_args, host]
 			# Own session, so a timeout can kill nmap and anything it spawned
 			p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 			(out, err) = p.communicate(None, timeout=90)

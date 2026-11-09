@@ -48,7 +48,7 @@ ADAPT:
 		full : all collected information is returned. 
 
 	nmap_script_ports : Which ports should the nmap script target? The target URL's own
-	port (e.g. 8080) is always scanned too. nmap is run with -Pn (no ping check),
+	port (e.g. 8080) is scanned too, except with 'all'. nmap is run with -Pn (no ping check),
 	since many hosts drop ping and ZAP has already reached the target.
 		all : nmap's default port list (its 1000 most common ports)
 		default (or empty) : port 80
