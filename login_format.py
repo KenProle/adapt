@@ -85,7 +85,7 @@ def service_auth(username, password):
 	dvwa_get = client.get(login_url, allow_redirects=False)
 
 	# begin parsing of the GET request 
-	s = soup(dvwa_get.text)
+	s = soup(dvwa_get.text, "html.parser")
 
 	# Search for the csrf token input on DVWA's login page 
 	user_token = s("input", {"name":"user_token"})[0]["value"]
