@@ -380,6 +380,7 @@ class AdaptZap():
 		# and the division (a later 0 would divide by zero).
 		scanned = 0
 		previous = None
+		shown = 0   # new records can lower the share done; don't move the bar back
 		while(True):
 			remaining = int(self.zap.pscan.records_to_scan)
 			if(remaining <= 0):
@@ -387,7 +388,8 @@ class AdaptZap():
 			if(previous is not None):
 				scanned += max(0, previous - remaining)
 			previous = remaining
-			if(self.args["adapt_general"]["verbose"]):bar.update(100 * scanned / (scanned + remaining))
+			shown = max(shown, 100 * scanned / (scanned + remaining))
+			if(self.args["adapt_general"]["verbose"]):bar.update(shown)
 			time.sleep(1)
 		if(self.args["adapt_general"]["verbose"]):bar.finish()
 		self.printer.aprint("Pscan done")

@@ -58,6 +58,8 @@ class PscanProgressTest(unittest.TestCase):
 		zap.printer = types.SimpleNamespace(aprint=lambda *a, **k: None)
 		zap.args = {"adapt_general": {"verbose": True}}
 		zap.already_opened = zap.already_connected = True
+		zap.close_on_finish = False   # so __del__ -> close() has nothing to stop
+		zap.p = None
 		zap.zap = types.SimpleNamespace(pscan=Pscan())
 		saved = (zap_interface.ProgressBar, zap_interface.time.sleep)
 		zap_interface.ProgressBar, zap_interface.time.sleep = make_bar, lambda s: None
