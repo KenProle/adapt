@@ -373,16 +373,21 @@ class AdaptZap():
 		bar = ProgressBar(maxval=100)
 		self.printer.aprint("This could take a while. Please be patient.")
 		if(self.args["adapt_general"]["verbose"]):bar.start()
-		# Show the share of records scanned so far. Read the count once per
-		# pass, and take the largest count seen as the total: records can
-		# arrive after the first read (which may have been 0).
-		total = 0
+		# Show the share of records scanned so far: scanned / (scanned + left).
+		# Records can keep arriving while ZAP scans, so count each drop in the
+		# remaining number as scanned rather than fixing a total up front.
+		# Read the count once per pass, so it can't change between the check
+		# and the division (a later 0 would divide by zero).
+		scanned = 0
+		previous = None
 		while(True):
 			remaining = int(self.zap.pscan.records_to_scan)
 			if(remaining <= 0):
 				break
-			total = max(total, remaining)
-			if(self.args["adapt_general"]["verbose"]):bar.update(100 * (total - remaining) / total)
+			if(previous is not None):
+				scanned += max(0, previous - remaining)
+			previous = remaining
+			if(self.args["adapt_general"]["verbose"]):bar.update(100 * scanned / (scanned + remaining))
 			time.sleep(1)
 		if(self.args["adapt_general"]["verbose"]):bar.finish()
 		self.printer.aprint("Pscan done")

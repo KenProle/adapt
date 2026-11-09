@@ -70,7 +70,7 @@ class ProgressBarTest(unittest.TestCase):
 		self.assertEqual(self.lines(bar), ["[====================] 100%"])
 
 	def test_fractional_value(self):
-		# pscan passes a fraction of records left, not a percentage
+		# values below 1% round down to 0%
 		bar = ProgressBar(maxval=100, stream=io.StringIO(), width=28)
 		bar.update(0.5)
 		self.assertEqual(self.lines(bar), ["[                    ]   0%"])
