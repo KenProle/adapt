@@ -83,6 +83,8 @@ class AdaptZap():
 		}
 
 	def spider_messages(self):
+		if(self.spiderid is None):
+			return []   # the spider didn't run (spider_scan = off)
 		in_scope_results = self.zap.spider.full_results(self.spiderid)[0]['urlsInScope']
 		messages = []
 		for res in in_scope_results:
@@ -90,6 +92,8 @@ class AdaptZap():
 		return messages
 
 	def spider_urls(self):
+		if(self.spiderid is None):
+			return []
 		return self.zap.spider.full_results(self.spiderid)[0]["urlsInScope"]
 
 	def send_request(self, request):
