@@ -181,7 +181,8 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	echo "Installing for Linux: "
 	echo "Please do not press anything until the script is finished, go take a break"
 	do_command sudo apt-get update -y
-	do_command sudo apt-get install python3-venv python3-pip -y
+	# The venv gets pip from python3-venv (via python3-pip-whl); the system pip isn't used.
+	do_command sudo apt-get install python3-venv -y
 	do_command sudo apt-get install default-jre -y
 	do_command sudo apt-get install nmap -y
 	# testssl.sh needs dig/host; the package is bind9-dnsutils on current
