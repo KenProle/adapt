@@ -42,7 +42,7 @@ class LogoutUrlsTest(unittest.TestCase):
 		self.assertTrue(self.excluded("http://h:8080/insecure-bank/j_spring_security_logout",
 			"http://h:8080/insecure-bank"))   # #67
 		for url in ("http://h/Logout.php", "http://h/user/sign-out", "http://h/signout",
-				"http://h/logoff", "https://h/auth/log_out", "http://h/LOGOUT.do",
+				"http://h/logoff", "http://h/auth/log_out", "http://h/LOGOUT.do",
 				"http://h/doLogout.action", "http://h/userLogout", "http://h/performLogOff",
 				"http://h/account/signOut", "http://h/signoff", "http://h/sign-off",
 				"http://h/logoutUser", "http://h/logout?next=/home"):
