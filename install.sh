@@ -30,6 +30,13 @@ launch_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # To upgrade ZAP, change this version and re-run the installer.
 ZAP_VERSION=2.17.0
+# testssl.sh and SecLists are pinned to the commits ADAPT was last tested with,
+# because upstream changes have broken ADAPT before (a moved SecLists file, a
+# new testssl.sh JSON layout). Bump them deliberately and re-test.
+TESTSSL_REPO=https://github.com/testssl/testssl.sh
+TESTSSL_COMMIT=6f0afecee2193135dfa83408e2486bb1d5586496
+SECLISTS_REPO=https://github.com/danielmiessler/SecLists.git
+SECLISTS_COMMIT=68bcd12457978649d41ae4f56e3b5d2db2b72560
 ZAP_DIR=/opt/ZAP_$ZAP_VERSION
 ZAP_URL=https://github.com/zaproxy/zaproxy/releases/download/v$ZAP_VERSION/ZAP_${ZAP_VERSION}_Linux.tar.gz
 
@@ -48,6 +55,32 @@ function do_command {
 	fi
 }
 
+# Shallow-fetch one pinned commit of a repo into a directory. It goes into
+# <dir>.partial first and is moved into place only when complete, so an
+# interrupted download isn't mistaken for an installed copy next time.
+function clone_pinned {
+	local repo=$1 dir=$2 commit=$3
+	local partial="$dir.partial"
+	do_command rm -rf "$partial"
+	do_command git init -q "$partial"
+	do_command git -C "$partial" fetch -q --depth 1 "$repo" "$commit"
+	do_command git -C "$partial" -c advice.detachedHead=false checkout -q FETCH_HEAD
+	do_command mv "$partial" "$dir"
+}
+
+# An existing copy is kept, but say so if it isn't at the pinned commit (e.g.
+# an older unpinned install, or after the pin was bumped). --git-dir stops git
+# from walking up into ADAPT's own repository when the copy has no .git.
+function check_pinned {
+	local dir=$1 commit=$2 head
+	head=$(git --git-dir="$dir/.git" rev-parse HEAD 2>/dev/null)
+	if [ "$head" != "$commit" ]
+	then
+		echo "  WARNING: $dir is at ${head:-an unknown commit}, not the pinned $commit."
+		echo "  To use the pinned version, delete $dir and re-run ./install.sh."
+	fi
+}
+
 if [ "$1" == "clean" ]; then
 	# Remove everything this script put inside the checkout (system packages
 	# and /opt/ZAP_* are left alone), plus the reports in output/.
@@ -57,7 +90,7 @@ if [ "$1" == "clean" ]; then
 		exit 1
 	fi
 	echo "Cleaning $launch_dir..."
-	for path in var/SecLists lib/testssl.sh lib/paramiko .venv var/adapt_installed
+	for path in var/SecLists var/SecLists.partial lib/testssl.sh lib/testssl.sh.partial lib/paramiko .venv var/adapt_installed
 	do
 		if [ -e "$launch_dir/$path" ]
 		then
@@ -71,11 +104,48 @@ if [ "$1" == "clean" ]; then
 	exit 0
 fi
 
+# The minimum supported Python version.
+MIN_PYTHON=3.12
+
+# Succeed if the given interpreter is at least MIN_PYTHON.
+function python_ok {
+	"$1" -c "import sys; sys.exit(sys.version_info < tuple(map(int, '$MIN_PYTHON'.split('.'))))" &> /dev/null
+}
+
+# Stop early, before downloading anything, if python3 is too old.
+function check_python {
+	echo -n "Checking for Python $MIN_PYTHON+: "
+	if python_ok "$1"
+	then
+		echo "FOUND ($("$1" -V 2>&1))"
+	else
+		echo "NOT FOUND ($("$1" -V 2>&1))"
+		echo "ADAPT needs Python $MIN_PYTHON or newer."
+		exit 1
+	fi
+}
+
 # Install the Python dependencies (requirements.txt, including wig) into
 # ./.venv as the current user. adapt.py re-runs itself with .venv/bin/python.
 # A venv avoids PEP 668 "externally-managed-environment" errors on current
 # distributions and keeps ADAPT's packages out of the system Python.
 function install_python_deps {
+	# Checked here too in case apt has only just installed python3.
+	python_ok python3 || check_python python3
+	# .venv/bin/python is a symlink to the system python3, so ask pyvenv.cfg
+	# which Python built the venv. One built by another Python (an older one,
+	# or before a distro upgrade) has its packages in the wrong lib/pythonX.Y.
+	local venv_version system_version
+	system_version=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+	if [ -d "$launch_dir"/.venv ]
+	then
+		venv_version=$(sed -n 's/^version *= *\([0-9]*\.[0-9]*\).*/\1/p' "$launch_dir"/.venv/pyvenv.cfg 2>/dev/null)
+		if [ "$venv_version" != "$system_version" ]
+		then
+			echo "Existing .venv was built with Python ${venv_version:-unknown}, not $system_version; recreating it."
+			do_command rm -rf "$launch_dir"/.venv
+		fi
+	fi
 	echo -n "Creating Python virtual environment (.venv): "
 	if [ -x "$launch_dir"/.venv/bin/python ] || python3 -m venv "$launch_dir"/.venv
 	then
@@ -100,11 +170,21 @@ if [ "$(uname)" == "Darwin" ]; then
 echo "Installing for MacOSX"
 	install_python_deps
 elif [ "$(uname -s)" == "Linux" ]; then
+	# Fail before the sudo prompt, apt and the large downloads if python3 is
+	# too old. (If python3 is missing, apt installs it below and
+	# install_python_deps checks it then.)
+	if command -v python3 &> /dev/null
+	then
+		check_python python3
+	fi
 	sudo --validate # update sudo permissions, so we don't have to enter a passwd for the rest of the script
 	echo "Installing for Linux: "
 	echo "Please do not press anything until the script is finished, go take a break"
 	do_command sudo apt-get update -y
-	do_command sudo apt-get install python3-venv python3-pip -y
+	# ADAPT uses the venv's own pip (from python3-venv), not the system pip.
+	# The C compiler and Python headers (which python3-pip used to pull in as
+	# Recommends) let pip build simple C extensions that have no prebuilt wheel.
+	do_command sudo apt-get install python3-venv build-essential python3-dev -y
 	do_command sudo apt-get install default-jre -y
 	do_command sudo apt-get install nmap -y
 	# testssl.sh needs dig/host; the package is bind9-dnsutils on current
@@ -115,7 +195,6 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	else
 		do_command sudo apt-get install dnsutils -y
 	fi
-	do_command sudo apt-get install docker.io -y
 	do_command sudo apt-get install git -y
 	# ZAP 2.16+ needs Java 17 or newer; default-jre is older on some releases.
 	echo -n "Checking for Java 17+: "
@@ -163,7 +242,7 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	# the user, not root; ADAPT runs as the user and must be able to write
 	# here. Earlier versions of this script used sudo, so hand any root-owned
 	# leftovers back to the user.
-	for path in output lib/testssl.sh var/SecLists lib/paramiko var/adapt_installed
+	for path in output tmp lib/testssl.sh lib/testssl.sh.partial var/SecLists var/SecLists.partial lib/paramiko var/adapt_installed
 	do
 		if [ -e "$launch_dir/$path" ] && [ -n "$(find "$launch_dir/$path" ! -user "$(id -u)" -print -quit)" ]
 		then
@@ -175,18 +254,20 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	if [ ! -d "$launch_dir"/lib/testssl.sh ]
 	then
 		echo "NOT FOUND"
-		do_command git clone --depth 1 https://github.com/drwetter/testssl.sh "$launch_dir"/lib/testssl.sh
+		clone_pinned "$TESTSSL_REPO" "$launch_dir"/lib/testssl.sh "$TESTSSL_COMMIT"
 	else
 		echo "FOUND"
+		check_pinned "$launch_dir"/lib/testssl.sh "$TESTSSL_COMMIT"
 	fi
 
 	echo -n "Checking for SecLists: "
 	if [ ! -d "$launch_dir"/var/SecLists ]
 	then
 		echo "NOT FOUND (downloading, this can take a few minutes)"
-		do_command git clone --depth 1 https://github.com/danielmiessler/SecLists.git "$launch_dir"/var/SecLists
+		clone_pinned "$SECLISTS_REPO" "$launch_dir"/var/SecLists "$SECLISTS_COMMIT"
 	else
 		echo "FOUND"
+		check_pinned "$launch_dir"/var/SecLists "$SECLISTS_COMMIT"
 	fi
 
 	mkdir -p "$launch_dir"/output

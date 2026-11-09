@@ -20,7 +20,7 @@
 
 try:
 	import re, subprocess, time, urllib.request, requests, random, copy, os
-	import scipy.stats as stats
+	from welch import welch_ttest
 	import itertools, os, errno, json, signal, socket, ssl, sys, traceback
 	from aprint import aprint
 	from urllib.parse import urlparse
@@ -379,7 +379,7 @@ class owasp_suite():
 		# get diffs for invalid logins
 		badun_bodys = [re.sub( bad_uname, "", str(msg['responseBody'])) for msg in badun_msgs ]
 		test_diffs = [ SequenceMatcher( None, b1, b2 ).ratio() for b1,b2 in zip( badpwd_bodys1, badun_bodys ) ]
-		res = stats.ttest_ind( baseline_diffs, test_diffs, equal_var=False )
+		res = welch_ttest( baseline_diffs, test_diffs )
 
 		if( res.pvalue < 0.05 ):
 			reports.append( create_report( 'ident_004', basic_description="Response difference between valid and invalid usernames on login page", severity='low', request='', confidence=1.0, path=self.unstripped_target ) )
@@ -390,7 +390,7 @@ class owasp_suite():
 
 		badun_rtts =  [ float(msg['rtt']) for msg in badun_msgs ]
 		avg_badun = sum( badun_rtts ) / len( badun_rtts )
-		res = stats.ttest_ind( badpwd_rtts, badun_rtts, equal_var=False )
+		res = welch_ttest( badpwd_rtts, badun_rtts )
 		if( max( badpwd_rtts + badun_rtts ) < 1.0 ):
 			# Almost certainly an auth module returning seconds, not milliseconds
 			print("ADAPT: ident_004: every login rtt is under 1 ms; check that the auth module returns rtt in milliseconds", file=sys.stderr)
@@ -411,9 +411,7 @@ class owasp_suite():
 			cwe=521,
 			owasp_association="2",
 			misc=[
-				# plain floats: scipy's result object is not JSON serialisable
-				# (df only exists from scipy 1.11)
-				{ "statistic": float( res.statistic ), "pvalue": float( res.pvalue ), "df": float( res.df ) if hasattr( res, "df" ) else None },
+				{ "statistic": float( res.statistic ), "pvalue": float( res.pvalue ), "df": float( res.df ) },
 				"{} v/i attempts with average rtt of {:.1f} ms".format( len( badpwd_rtts), avg_badpwd ),
 				"{} i/i attempts with average rtt of {:.1f} ms".format( len( badun_rtts), avg_badun )] ) )
 			
