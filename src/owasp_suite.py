@@ -251,7 +251,8 @@ class owasp_suite():
 			except Exception as e:
 				try:
 					# Target may use a self-signed certificate; we only read the page
-					html = requests.get(url, timeout=15, verify=False).text
+					# no redirects: a redirect could lead off the target host
+					html = requests.get(url, timeout=15, verify=False, allow_redirects=False).text
 				except Exception as e2:
 					self.printer.aprint("config_002: could not fetch "+url+": "+str(e2), 1)
 					continue
@@ -372,6 +373,10 @@ class owasp_suite():
 			found = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', section)
 			urls = []
 			for u in found:
+				# "@" (userinfo) and "\" make Python's urlparse and the requests
+				# fallback disagree about the host, so skip such URLs
+				if ("@" in u or "\\" in u):
+					continue
 				try:
 					if (urlparse(u).hostname == host and u not in urls):
 						urls.append(u)
