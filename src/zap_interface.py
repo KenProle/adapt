@@ -27,6 +27,12 @@ from progress import ProgressBar
 class AdaptZap():
 	# Seconds to wait for ZAP's API to come up before giving up
 	ZAP_STARTUP_TIMEOUT = 180
+	# URLs ZAP must never request: following a logout link ends the logged-in
+	# session, so everything spidered or tested after it is only the login
+	# page (e.g. Spring's /j_spring_security_logout). Java regex, whole URL.
+	# (?<![a-z]): a word start, so "blogoffers" isn't matched but
+	# "j_spring_security_logout" and "/Logout.php" are.
+	LOGOUT_URLS = "(?i).*(?<![a-z])(log[-_]?out|sign[-_]?out|log[-_]?off).*"
 
 	def __init__(self, args):
 		self.args = args
@@ -211,6 +217,8 @@ class AdaptZap():
 		for e in excluded_paths:
 			self.printer.aprint("Excluded path: {}".format(e))
 			self.zap.context.exclude_from_context(context_name, "{}{}".format(self.context,e))
+		self.printer.aprint("Excluded logout URLs: {}".format(self.LOGOUT_URLS))
+		self.zap.context.exclude_from_context(context_name, self.LOGOUT_URLS)
 		return contextid
 
 	def __wait_for_api(self, version_url, opener, start):

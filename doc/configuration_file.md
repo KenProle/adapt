@@ -102,7 +102,11 @@ ZAP:
 
 	api_key : The specified api_key for zap. Default is none. (recommended: none)
 
-	exclude : Space separated list of all paths that are to be excluded from testing/directory traversal/injection. 
+	exclude : Space separated list of all paths that are to be excluded from testing/directory traversal/injection.
+		Each is appended to 'context' and must match the whole URL. URLs containing
+		logout, log-out, signout, sign-out or logoff (any case) are always excluded:
+		if ZAP's spider follows a logout link, the logged-in session ends and everything
+		spidered or tested after it only sees the login page. 
 
 AUTH:
 	auth_module : the name of the custom python login script goes here. 
