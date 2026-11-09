@@ -37,7 +37,7 @@ try:
 	from timeit import default_timer
 	from error import error_suite
 	from time import sleep
-	from nmap_scripts import nmap_scripting
+	from nmap_scripts import nmap_scripting, nmap_target, nmap_path, target_options
 except Exception as e:
 	import sys
 	print("Cannot import module: "+str(e)+". Quitting...")
@@ -122,8 +122,8 @@ class owasp_suite():
 
 		if(self.args["adapt_general"]["nmap_script_ports"] != "skip"):
 			self.printer.aprint("Nmap Starting")
-			nmap_scripter = nmap_scripting(self.unstripped_target, self.args["adapt_general"]["nmap_script_ports"])
 			try:
+				nmap_scripter = nmap_scripting(self.unstripped_target, self.args["adapt_general"]["nmap_script_ports"])
 				self.nmap_results = nmap_scripter.run()
 			except Exception as nmap_exception:
 				self.printer.aprint("NMAP SCRIPT FAILED: "+str(nmap_exception), 2)
@@ -251,7 +251,8 @@ class owasp_suite():
 			except Exception as e:
 				try:
 					# Target may use a self-signed certificate; we only read the page
-					html = requests.get(url, timeout=15, verify=False).text
+					# no redirects: a redirect could lead off the target host
+					html = requests.get(url, timeout=15, verify=False, allow_redirects=False).text
 				except Exception as e2:
 					self.printer.aprint("config_002: could not fetch "+url+": "+str(e2), 1)
 					continue
@@ -329,15 +330,17 @@ class owasp_suite():
 			report_list = report_list + temp
 
 		# comments in nmap urls
-		if (self.nmap_crawl_size != None):
-			cmd = ["nmap", "--script", "http-errors", "--script-args", "httpspider.maxpagecount="+self.nmap_crawl_size, self.stripped_target]
-		else:
-			cmd = ["nmap", "--script", "http-errors", self.stripped_target]
-
 		ignore_nmap = False
 		nmap_results = ""
 		p = None
 		try:
+			# The bare host and the target's own port: nmap can't resolve
+			# "host:port/path", and its default ports may not include the target's
+			host, port = nmap_target(self.unstripped_target)
+			script_args = "httpspider.url="+nmap_path(self.unstripped_target)
+			if (self.nmap_crawl_size != None):
+				script_args += ",httpspider.maxpagecount="+self.nmap_crawl_size
+			cmd = ["nmap"] + target_options(host) + ["-p", str(port), "--script", "+http-errors", "--script-args", script_args, host]
 			# Own session, so a timeout can kill nmap and anything it spawned
 			p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
 			(out, err) = p.communicate(None, timeout=90)
@@ -363,7 +366,22 @@ class owasp_suite():
 
 		# nmap_results = "Found the following error pages: https://help.disqus.com/customer/portal/articles/466253-what-html-tags-are-allowed-within-comments-"
 		if "Found the following error pages" in nmap_results and not ignore_nmap :
-			urls = re.findall('http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', nmap_results)
+			# Only URLs from the error-pages section, and only on the target
+			# host: nmap's output has other URLs too (its banner links to
+			# https://nmap.org), and ADAPT must not fetch third-party sites.
+			section = nmap_results.split("Found the following error pages", 1)[1]
+			found = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', section)
+			urls = []
+			for u in found:
+				# "@" (userinfo) and "\" make Python's urlparse and the requests
+				# fallback disagree about the host, so skip such URLs
+				if ("@" in u or "\\" in u):
+					continue
+				try:
+					if (urlparse(u).hostname == host and u not in urls):
+						urls.append(u)
+				except ValueError:
+					pass
 			comments = self.find_comments_in_html_by_urls(urls)
 			# One report per distinct comment, like the ZAP half, skipping
 			# (comment, url) pairs the ZAP half already reported
