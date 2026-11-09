@@ -184,10 +184,12 @@ class nmap_scripting():
 
 	def run(self):
 		arguments = target_options(self.target) + list(self.port_values)
+		# "+": run the script on the listed ports even when nmap doesn't
+		# recognise them as HTTP (e.g. an app on port 3000). Not with "all",
+		# where it would send HTTP probes to every open port (SSH, databases...)
+		force = "+" if self.port_values else ""
 		for script in self.__valid_scripts:
-			# "+": run the script on the scanned ports even when nmap doesn't
-			# recognise them as HTTP (e.g. an app on port 3000)
-			arguments += ["--script", "+"+script]
+			arguments += ["--script", force+script]
 		if("http-methods" in self.__valid_scripts):
 			arguments += ["--script-args", "http-methods.url-path="+self.path]
 		return script_outputs(run_nmap(self.target, arguments))

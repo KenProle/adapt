@@ -109,7 +109,7 @@ class NmapScriptingTest(unittest.TestCase):
 
 	def test_all_ports(self):
 		self.assertEqual(self.run_args("https://example.test/", None, ["a", "b"]),
-			("example.test", ["-Pn", "--script", "+a", "--script", "+b"]))
+			("example.test", ["-Pn", "--script", "a", "--script", "b"]))
 
 	def test_ipv6(self):
 		self.assertEqual(self.run_args("http://[2001:db8::1]:8080/", "80"),
