@@ -9,3 +9,4 @@ SecLists/
 paramiko/
 testssl.sh
 .venv/
+*.partial/
