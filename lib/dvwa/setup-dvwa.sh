@@ -7,8 +7,8 @@ dpkg -l docker docker.io &> /dev/null
 if [[ $? -ne 0 ]]
 then
 	echo "FAILED"
-	echo "Try running ./install.sh"
-	echo "Or run 'apt-get install docker docker.io"
+	echo "ADAPT's installer doesn't install Docker; see the DVWA section of doc/installing.md,"
+	echo "or run: sudo apt-get install docker.io"
 	exit -1
 else
 	echo "PASSED"

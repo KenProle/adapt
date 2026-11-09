@@ -108,12 +108,13 @@ and run a docker container with the Damn Vulnerable Web App.
 DVWA is deliberately vulnerable: only run it on a machine and network you trust.
 It is published on port 80 on all interfaces.
 
-`install.sh` doesn't install Docker, since ADAPT itself doesn't use it. Make sure
-docker is installed and running, and the user is in the `docker` group.
-Membership of `docker` is equivalent to root access on that machine. This is not
-automated, but the steps will probably look like
+`install.sh` doesn't install Docker, since ADAPT itself doesn't use it. Install it,
+make sure it is running, and add the user to the `docker` group. Membership of
+`docker` is equivalent to root access on that machine. The steps will probably
+look like
 
     sudo apt-get install docker.io
+    sudo service docker start    # if it isn't running (e.g. WSL without systemd)
     sudo gpasswd -a ${USER} docker
 
 Log out and in again to apply the group change. Then, from inside `lib/dvwa`
