@@ -26,10 +26,26 @@ The installer:
 * shallow-clones testssl.sh into `lib/` and SecLists into `var/`, at the commits
   pinned in `TESTSSL_COMMIT` and `SECLISTS_COMMIT` in `install.sh`
 * creates a Python venv at `./.venv` from `requirements.txt`, whose versions are
-  pinned to the ones ADAPT was last tested with
+  pinned to the ones ADAPT was last tested with (it stops early if `python3` is
+  older than 3.12, and recreates a `.venv` made by an older Python)
+* records a fingerprint of the pins (`requirements.txt` and `install.sh`) in
+  `var/adapt_installed`
+
+`requirements.txt` pins ADAPT's direct Python dependencies only; the packages
+they depend on are resolved by pip at install time and can change between
+installs.
+
+When the pins change (for example after `git pull`), `adapt.py` notices the
+fingerprint no longer matches and re-runs the installer before starting. That
+updates the Python packages; an existing `lib/testssl.sh` or `var/SecLists` that
+isn't at the pinned commit is kept, with a warning.
 
 To update a dependency, change its pin, re-run `./install.sh` (for testssl.sh or
-SecLists, delete `lib/testssl.sh` or `var/SecLists` first), and re-test.
+SecLists, delete `lib/testssl.sh` or `var/SecLists` first), and re-test. For
+SecLists, check that the file ADAPT reads (`default_password_file` in
+`var/configuration.json`, currently
+`Passwords/Common-Credentials/darkweb2017_top-100.txt`) still exists at the new
+commit.
 
 The installer creates its files as your user. Re-running `./install.sh` is safe,
 and hands `output/`, `tmp/`, `lib/testssl.sh`, `var/SecLists` and `var/adapt_installed`

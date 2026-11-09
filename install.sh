@@ -69,10 +69,11 @@ function clone_pinned {
 }
 
 # An existing copy is kept, but say so if it isn't at the pinned commit (e.g.
-# an older unpinned install, or after the pin was bumped).
+# an older unpinned install, or after the pin was bumped). --git-dir stops git
+# from walking up into ADAPT's own repository when the copy has no .git.
 function check_pinned {
 	local dir=$1 commit=$2 head
-	head=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
+	head=$(git --git-dir="$dir/.git" rev-parse HEAD 2>/dev/null)
 	if [ "$head" != "$commit" ]
 	then
 		echo "  WARNING: $dir is at ${head:-an unknown commit}, not the pinned $commit."
@@ -103,11 +104,47 @@ if [ "$1" == "clean" ]; then
 	exit 0
 fi
 
+# The pinned packages in requirements.txt (scipy in particular) need this.
+MIN_PYTHON=3.12
+
+# Succeed if the given interpreter is at least MIN_PYTHON.
+function python_ok {
+	"$1" -c "import sys; sys.exit(sys.version_info < tuple(map(int, '$MIN_PYTHON'.split('.'))))" &> /dev/null
+}
+
+# Stop early, before downloading anything, if python3 is too old.
+function check_python {
+	echo -n "Checking for Python $MIN_PYTHON+: "
+	if python_ok "$1"
+	then
+		echo "FOUND ($("$1" -V 2>&1))"
+	else
+		echo "NOT FOUND ($("$1" -V 2>&1))"
+		echo "ADAPT's pinned Python packages need Python $MIN_PYTHON or newer."
+		exit 1
+	fi
+}
+
+# A fingerprint of the pins (requirements.txt and this script, which holds the
+# ZAP version and the testssl.sh/SecLists commits). It is written to
+# var/adapt_installed, and adapt.py re-runs this installer when it changes.
+# adapt.py computes the same value; keep the two in sync.
+function pin_fingerprint {
+	cat "$launch_dir"/requirements.txt "$launch_dir"/install.sh | sha256sum | cut -d' ' -f1
+}
+
 # Install the Python dependencies (requirements.txt, including wig) into
 # ./.venv as the current user. adapt.py re-runs itself with .venv/bin/python.
 # A venv avoids PEP 668 "externally-managed-environment" errors on current
 # distributions and keeps ADAPT's packages out of the system Python.
 function install_python_deps {
+	check_python python3
+	# A .venv made by an older Python can't install the pinned packages.
+	if [ -x "$launch_dir"/.venv/bin/python ] && ! python_ok "$launch_dir"/.venv/bin/python
+	then
+		echo "Existing .venv uses Python older than $MIN_PYTHON; recreating it."
+		do_command rm -rf "$launch_dir"/.venv
+	fi
 	echo -n "Creating Python virtual environment (.venv): "
 	if [ -x "$launch_dir"/.venv/bin/python ] || python3 -m venv "$launch_dir"/.venv
 	then
@@ -135,6 +172,12 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	sudo --validate # update sudo permissions, so we don't have to enter a passwd for the rest of the script
 	echo "Installing for Linux: "
 	echo "Please do not press anything until the script is finished, go take a break"
+	# Fail before apt and the large downloads if python3 is too old. (If
+	# python3 is missing, apt installs it below and install_python_deps checks.)
+	if command -v python3 &> /dev/null
+	then
+		check_python python3
+	fi
 	do_command sudo apt-get update -y
 	do_command sudo apt-get install python3-venv python3-pip -y
 	do_command sudo apt-get install default-jre -y
@@ -227,8 +270,8 @@ elif [ "$(uname -s)" == "Linux" ]; then
 
 	install_python_deps
 
-	# Now to write out a temp file which will indicate that we ran the install script
-	touch "$launch_dir"/var/adapt_installed
+	# Mark the install as done, recording which pins it installed.
+	pin_fingerprint > "$launch_dir"/var/adapt_installed
 
 	echo "ADAPT install: FINISHED"
 else

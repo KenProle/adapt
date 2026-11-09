@@ -1,7 +1,9 @@
 # Python dependencies for ADAPT. install.sh installs these into ./.venv.
 # Pinned to the versions ADAPT was last tested with (Ubuntu 26.04, Python 3.14),
-# so a new upstream release can't change ADAPT's behaviour unnoticed. Bump them
-# deliberately and re-test.
+# so a new release of one of these packages can't change ADAPT's behaviour
+# unnoticed. Only these direct dependencies are pinned: the packages they depend
+# on are resolved by pip at install time and may be newer on a fresh install.
+# Bump the pins deliberately and re-test. Needs Python 3.12+.
 beautifulsoup4==4.15.0
 dicttoxml==1.7.16
 lxml==6.1.3
