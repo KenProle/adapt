@@ -19,7 +19,7 @@
 #
 
 import json, datetime, csv, os, pathlib, time, tempfile
-from dicttoxml import dicttoxml
+from xml_output import to_xml
 
 _PARANOID_VALUE = -1.0
 _LOW_VALUE = 0.25
@@ -347,7 +347,7 @@ class adapt_analysis():
 		try:
 			pathlib.Path('./output/').mkdir(parents=True, exist_ok=True)
 			if(self.output_format == "xml"):
-				xml = dicttoxml(self.final_results, attr_type=False)
+				xml = to_xml(self.final_results)
 				with open(self.output_file, "wb") as f:
 					f.write(xml)
 			else:
