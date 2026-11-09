@@ -104,7 +104,17 @@ ZAP:
 
 	api_key : The specified api_key for zap. Default is none. (recommended: none)
 
-	exclude : Space separated list of all paths that are to be excluded from testing/directory traversal/injection. 
+	exclude : Space separated list of all paths that are to be excluded from testing/directory traversal/injection.
+		Each is appended to 'context' and must match the whole URL (it is a regex).
+		URLs under 'context' are always excluded if their path (not host) contains a
+		logout word: logout, log-out, log_out, logoff, signout, sign-out, signoff,
+		sign-off in any case, on their own (/logout, /LOGOUT.do,
+		/j_spring_security_logout) or as part of a camelCase name (/doLogout, /signOut),
+		but not inside other words (/blogoffers, /log_output.jsp). So are URLs with a
+		query parameter whose name or value is exactly such a word (?action=logout,
+		?do=logout, ?logout=1). If ZAP's spider
+		follows a logout link, the logged-in session ends and everything spidered or
+		tested after it only sees the login page. 
 
 AUTH:
 	auth_module : the name of the custom python login script goes here. 
