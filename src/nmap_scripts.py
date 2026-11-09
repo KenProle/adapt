@@ -19,8 +19,38 @@
 #
 
 import subprocess
-import nmap
+import xml.etree.ElementTree as ET
 from pprint import pprint
+
+
+def script_outputs(xml_text):
+	"""From nmap's XML output (-oX), return one {script id: output} dict per
+	port that has script results, in the order nmap lists them. This is the
+	part of python-nmap's scan result ADAPT used."""
+	root = ET.fromstring(xml_text)
+	results = []
+	for port in root.iter("port"):
+		scripts = {s.get("id"): s.get("output", "") for s in port.findall("script")}
+		if scripts:
+			results.append(scripts)
+	return results
+
+
+def run_nmap(host, arguments):
+	"""Run nmap with XML output on stdout and return that XML. The arguments
+	are passed as a list, never through a shell. Like python-nmap, an error is
+	raised only when nmap produced no usable XML."""
+	if not host or host.startswith("-"):
+		raise ValueError("invalid nmap target: %r" % host)
+	# stdin=DEVNULL: otherwise nmap reads keypresses from ADAPT's terminal
+	proc = subprocess.run(["nmap", "-oX", "-", host] + list(arguments),
+		stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	xml_text = proc.stdout.decode("utf-8", "replace")
+	try:
+		ET.fromstring(xml_text)
+	except ET.ParseError:
+		raise RuntimeError("nmap failed (exit %d): %s" % (proc.returncode, proc.stderr.decode("utf-8", "replace").strip()))
+	return xml_text
 
 def translate_url(url):
 	if(url.startswith("https://")):
@@ -37,29 +67,13 @@ def translate_url(url):
 
 	return url
 
-def find(data):
-	try:
-		for k,v in data.items():
-			if(k == "script"):
-				yield v
-			elif(isinstance(v, dict)):
-				for result in find(v):
-					yield result
-			elif(isinstance(v, list)):
-				for d in v:
-					for result in find(d):
-						yield result
-	except AttributeError:
-		yield data
-
 class nmap_scripting():
 	def __init__(self, target, ports, scripts_to_run=None):
 		if(ports != None):
-			self.port_values = "-p"+",".join(ports.split())
+			self.port_values = ["-p"+",".join(ports.split())]
 		else:
-			self.port_values = ""
+			self.port_values = []
 		self.target = translate_url(target)
-		self.nm = nmap.PortScanner()
 		self.__valid_scripts = []
 		if(scripts_to_run is None):
 			# for current project goals only one script is run
@@ -138,7 +152,8 @@ class nmap_scripting():
 				self.__valid_scripts.append(i)
 
 	def run(self):
-		results = self.nm.scan(self.target, arguments=self.port_values+" --script "+" --script ".join(self.__valid_scripts))
-
-		return list(find(results))
+		arguments = list(self.port_values)
+		for script in self.__valid_scripts:
+			arguments += ["--script", script]
+		return script_outputs(run_nmap(self.target, arguments))
 
