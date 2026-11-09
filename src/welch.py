@@ -94,10 +94,13 @@ def welch_ttest(a, b):
 
 	Edge cases follow scipy: an empty sample gives NaN for everything; a
 	sample with one value gives NaN statistic and p-value; when neither
-	sample varies, different means give statistic +/-inf and p-value 0, and
-	equal means give NaN. scipy reports df as 1 wherever it would be
-	undefined, and so does this. Values too large to square, and infinite or
-	NaN values, give NaN for everything (scipy returns inf or NaN there).
+	sample varies (or their variation is so small, below about 1e-154, that
+	its square underflows to zero), different means give statistic +/-inf
+	and p-value 0, and equal means give NaN. scipy reports df as 1 wherever
+	it would be undefined, and so does this.
+
+	Unlike scipy, infinite or NaN values, and varying values too large to
+	square, give NaN for everything rather than a misleading number.
 	"""
 	a = [float(v) for v in a]
 	b = [float(v) for v in b]
