@@ -82,7 +82,7 @@ class ProgressBarTest(unittest.TestCase):
 		bar.finish()
 		out = bar.stream.getvalue()
 		self.assertEqual(out.count("\r"), 3)
-		self.assertTrue(out.endswith("100%\n"))
+		self.assertTrue(out.endswith("100%\x1b[K\n"))
 		self.assertEqual(out.count("\n"), 1)
 
 	def test_default_width_fits_terminal(self):
@@ -91,6 +91,21 @@ class ProgressBarTest(unittest.TestCase):
 		line = self.lines(bar)[0]
 		self.assertLessEqual(len(line), shutil.get_terminal_size((80, 24)).columns)
 		self.assertTrue(line.endswith("] 100%"))
+
+	def test_narrow_terminal_shows_percentage_only(self):
+		bar = ProgressBar(maxval=100, stream=io.StringIO(), width=12)
+		bar.update(40)
+		self.assertEqual(self.lines(bar), [" 40%"])
+
+	def test_closed_stream_does_not_raise(self):
+		class Closed(io.StringIO):
+			def write(self, text):
+				raise BrokenPipeError()
+		bar = ProgressBar(maxval=100, stream=Closed(), width=28)
+		bar.start()
+		bar.update(50)
+		bar.finish()
+		self.assertTrue(bar.broken)
 
 
 if __name__ == "__main__":
