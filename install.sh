@@ -195,7 +195,6 @@ elif [ "$(uname -s)" == "Linux" ]; then
 	else
 		do_command sudo apt-get install dnsutils -y
 	fi
-	do_command sudo apt-get install docker.io -y
 	do_command sudo apt-get install git -y
 	# ZAP 2.16+ needs Java 17 or newer; default-jre is older on some releases.
 	echo -n "Checking for Java 17+: "

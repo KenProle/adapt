@@ -108,7 +108,8 @@ and run a docker container with the Damn Vulnerable Web App.
 DVWA is deliberately vulnerable: only run it on a machine and network you trust.
 It is published on port 80 on all interfaces.
 
-Make sure docker is installed and running, and the user is in the `docker` group.
+`install.sh` doesn't install Docker, since ADAPT itself doesn't use it. Make sure
+docker is installed and running, and the user is in the `docker` group.
 Membership of `docker` is equivalent to root access on that machine. This is not
 automated, but the steps will probably look like
 
