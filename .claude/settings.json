@@ -1,0 +1,14 @@
+{
+  "extraKnownMarketplaces": {
+    "sec-context": {
+      "source": { "source": "github", "repo": "KenProle/sec-context" }
+    },
+    "trim-reaper": {
+      "source": { "source": "github", "repo": "KenProle/trim-reaper" }
+    }
+  },
+  "enabledPlugins": {
+    "sec-context@sec-context": true,
+    "trim-reaper@trim-reaper": true
+  }
+}
