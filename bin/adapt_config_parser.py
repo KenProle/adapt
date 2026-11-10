@@ -210,7 +210,7 @@ def get_config_defaults(contents):
 
 	while(True):
 		sock = socket.socket()
-		sock.bind(('', 0))
+		sock.bind(('127.0.0.1', 0))
 		try:
 			p = str(sock.getsockname()[1])
 			sock.close()
@@ -243,4 +243,3 @@ def parse():
 		f.close()
 
 	return filename
-
