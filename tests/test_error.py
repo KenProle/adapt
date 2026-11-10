@@ -96,8 +96,28 @@ class TestSignatures(unittest.TestCase):
 			"You have an error in your SQL syntax; check the manual",
 			"ORA-00933: SQL command not properly ended",
 			"    at Object.<anonymous> (/app/server.js:10:5)",
+			"Traceback <em>(most recent call last)</em>",
+			"app/models/user.rb:12:in 'Integer#/'",
+			"app/models/user.rb:12:in `divide'",
+			'ERROR: syntax error at or near "\'"',
+			"Incorrect syntax near 'x'.",
+			"org.postgresql.util.PSQLException: ERROR: unterminated quoted string",
+			"com.mysql.cj.jdbc.exceptions.CommunicationsException",
 		]:
 			self.assertIsNotNone(error.find_error_signature(text), text)
+
+	def test_all_signatures_found_once_each(self):
+		text = "java.lang.NullPointerException ... java.lang.NullPointerException ... ORA-00933"
+		self.assertEqual(error.find_error_signatures(text), ["java.lang.NullPointerException", "ORA-00933"])
+
+	def test_linear_time_on_hostile_bodies(self):
+		# 1 MB of each takes well under a second; with unbounded patterns some
+		# took seconds at 100 KB and grew quadratically. 3 s allows for slow machines
+		import time
+		for body in ["A"*1000000, "foo at bar "*100000, "Stack trace:"+" "*1000000, "at "*300000, "java."*200000, "System."*150000, "Warning: "*100000, ".js:1:"*150000]:
+			start = time.monotonic()
+			error.find_error_signatures(body)
+			self.assertLess(time.monotonic() - start, 3.0, body[:20])
 
 	def test_ordinary_error_pages_do_not_match(self):
 		for text in [PLAIN_404, "", None, "Warning: your session will expire", "javascript error handler", "see line 4 of the form"]:
@@ -145,6 +165,16 @@ class TestAttack(ErrorTestBase):
 		reports = error.error_suite(ARGS, zap).attack_url_via_get1_v2(message("/p?a=1", TOMCAT_500))
 		self.assertEqual(reports, [])
 
+	def test_new_error_on_a_page_with_a_notice_is_reported(self):
+		notice = "<b>Deprecated</b>: old() in <b>/var/www/x.php</b> on line <b>3</b>"
+		def respond(line):
+			if params(line).get("a") == "":
+				return response(200, notice+" You have an error in your SQL syntax")
+			return response(200, notice)
+		reports = error.error_suite(ARGS, FakeZap(respond)).attack_url_via_get1_v2(message("/p?a=1", notice))
+		self.assertEqual(len(reports), 1)
+		self.assertEqual(reports[0]["misc"][0], "Matched: You have an error in your SQL syntax")
+
 
 class TestFailures(ErrorTestBase):
 	def test_failed_requests_keep_other_results(self):
@@ -164,6 +194,33 @@ class TestFailures(ErrorTestBase):
 		self.assertEqual(len(errors), 1)
 		# 2 failed requests per page, plus the message that couldn't be read
 		self.assertIn("5 request(s) failed", errors[0]["basic_description"])
+
+	def test_failure_text_is_short_and_has_no_exception_text(self):
+		def respond(line):
+			raise Exception("ZAP said: GET /p HTTP/1.1\r\nCookie: JSESSIONID=secret")
+		reports = error.error_suite(ARGS, FakeZap(respond, [message("/p?a=1")])).run()
+		self.assertEqual(len(reports), 1)
+		text = reports[0]["basic_description"]
+		self.assertNotIn("secret", text)
+		self.assertLess(len(text), 400)    # the "A"*2048 request line is cut short
+
+	def test_a_failure_while_writing_keeps_the_page_findings(self):
+		zap = FakeZap(lambda line: response(500, TOMCAT_500))
+		suite = error.error_suite(ARGS, zap)
+		msg = message("/p?a=1&b=2")
+		real_write = error.HTTPRequest.write
+		def write(req):
+			if req.path_params.get("b") == "":
+				raise ValueError("cannot write")
+			return real_write(req)
+		error.HTTPRequest.write = write
+		try:
+			reports = suite.attack_url_via_get1_v2(msg)
+		finally:
+			error.HTTPRequest.write = real_write
+		attacks = 2 + len(suite.build_sql_injections())
+		self.assertEqual(len(reports), 2 * attacks - 1)
+		self.assertEqual(suite.failures, 1)
 
 	def test_no_error_entry_when_nothing_failed(self):
 		zap = FakeZap(lambda line: response(200, "ok"), [message("/p?a=1")])
