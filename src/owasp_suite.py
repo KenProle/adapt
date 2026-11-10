@@ -45,6 +45,8 @@ except Exception as e:
 
 from pprint import pprint
 
+NMAP_ERROR_URL_PATTERN = r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+"
+
 def __type_check(val, t):
 	if(type(val) == t):
 		return True
@@ -370,7 +372,7 @@ class owasp_suite():
 			# host: nmap's output has other URLs too (its banner links to
 			# https://nmap.org), and ADAPT must not fetch third-party sites.
 			section = nmap_results.split("Found the following error pages", 1)[1]
-			found = re.findall(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', section)
+			found = re.findall(NMAP_ERROR_URL_PATTERN, section)
 			urls = []
 			for u in found:
 				# "@" (userinfo) and "\" make Python's urlparse and the requests
@@ -1001,4 +1003,3 @@ class owasp_suite():
 		for s in sessions:
 			self.get_cookies_cache.append(s[1][1])
 		return self.__get_cookies(num)
-
