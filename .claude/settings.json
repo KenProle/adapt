@@ -1,14 +1,12 @@
 {
   "extraKnownMarketplaces": {
-    "sec-context": {
-      "source": { "source": "github", "repo": "KenProle/sec-context" }
-    },
-    "trim-reaper": {
-      "source": { "source": "github", "repo": "KenProle/trim-reaper" }
+    "kenprole-plugins": {
+      "source": { "source": "github", "repo": "KenProle/claude-plugins" }
     }
   },
   "enabledPlugins": {
-    "sec-context@sec-context": true,
-    "trim-reaper@trim-reaper": true
+    "dev-workflow@kenprole-plugins": true,
+    "sec-context@kenprole-plugins": true,
+    "trim-reaper@kenprole-plugins": true
   }
 }
