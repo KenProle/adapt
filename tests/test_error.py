@@ -112,13 +112,26 @@ class TestSignatures(unittest.TestCase):
 		self.assertEqual(error.find_error_signatures(text), ["java.lang.NullPointerException", "ORA-00933"])
 
 	def test_linear_time_on_hostile_bodies(self):
-		# 1 MB of each takes well under a second; with unbounded patterns some
-		# took seconds at 100 KB and grew quadratically. 3 s allows for slow machines
+		# With unbounded patterns some of these took seconds at 100 KB and
+		# grew quadratically. Rather than a fixed limit, which a slow or busy
+		# machine could miss, check how the time grows: four times the text
+		# should take about four times as long, where quadratic would be 16.
+		# Kept small so that a quadratic pattern fails in seconds, not hangs
 		import time
-		for body in ["A"*1000000, "foo at bar "*100000, "Stack trace:"+" "*1000000, "at "*300000, "java."*200000, "System."*150000, "Warning: "*100000, ".js:1:"*150000]:
-			start = time.monotonic()
-			error.find_error_signatures(body)
-			self.assertLess(time.monotonic() - start, 3.0, body[:20])
+		def best_time(body):
+			times = []
+			for _ in range(2):
+				start = time.perf_counter()
+				error.find_error_signatures(body)
+				times.append(time.perf_counter() - start)
+			return min(times)
+		for unit in ["A", "foo at bar ", " ", "at ", "java.", "System.", "Warning: ", ".js:1:", "Server Error in '"]:
+			small = unit * (25000 // len(unit))
+			if(unit == " "):
+				small = "Stack trace:" + small
+			large = small * 4
+			t_small, t_large = best_time(small), best_time(large)
+			self.assertLess(t_large, 8 * t_small + 0.05, "{!r}: {:.3f}s for 25 KB, {:.3f}s for 100 KB".format(unit, t_small, t_large))
 
 	def test_ordinary_error_pages_do_not_match(self):
 		for text in [PLAIN_404, "", None, "Warning: your session will expire", "javascript error handler", "see line 4 of the form"]:
@@ -174,10 +187,30 @@ class TestAttack(ErrorTestBase):
 		self.assertEqual(reports, [])
 
 	def test_signature_key(self):
-		self.assertEqual(error.signature_key("Warning</b>: bad 'x' in <b>/a/x.php</b> on line <b>3"),
-			error.signature_key("Warning</b>: other 'y' in <b>/a/x.php</b> on line <b>3"))
-		self.assertEqual(error.signature_key("ORA-00001"), error.signature_key("ORA-00001", "1"))
-		self.assertEqual(error.signature_key("near abc' OR x=1 here", "abc' OR x=1"), error.signature_key("near  here"))
+		key = error.signature_key
+		# PHP: the quoted input doesn't matter...
+		self.assertEqual(key("Warning</b>: f(): bad 'x' in <b>/a/x.php</b> on line <b>3"),
+			key("Warning</b>: f(): other 'y' in <b>/a/x.php</b> on line <b>3"))
+		# ...but the level and function do
+		self.assertNotEqual(key("Notice</b>: Undefined index: q in <b>/a/x.php</b> on line <b>12"),
+			key("Warning</b>: mysqli_query(): bad in <b>/a/x.php</b> on line <b>12"))
+		self.assertNotEqual(key("Warning</b>: f(): x in <b>/a/x.php</b> on line <b>3"),
+			key("Warning</b>: g(): x in <b>/a/x.php</b> on line <b>3"))
+		# anything else is compared as it is
+		self.assertEqual(key("(FrameworkServlet.java:982)"), "(FrameworkServlet.java:982)")
+
+	def test_trace_containing_the_parameter_value_is_not_new(self):
+		# The parameter's value (982) happens to be in the trace on every page
+		zap = FakeZap(lambda line: response(500, TOMCAT_500))
+		reports = error.error_suite(ARGS, zap).attack_url_via_get1_v2(message("/p?id=982", TOMCAT_500))
+		self.assertEqual(reports, [])
+
+	def test_different_php_error_on_the_same_line_is_new(self):
+		notice = "<b>Notice</b>: Undefined index: q in <b>/var/www/q.php</b> on line <b>12</b>"
+		warning = "<b>Warning</b>: mysqli_query(): bad in <b>/var/www/q.php</b> on line <b>12</b>"
+		zap = FakeZap(lambda line: response(200, notice + warning))
+		reports = error.error_suite(ARGS, zap).attack_url_via_get1_v2(message("/p?a=1", notice))
+		self.assertEqual(len(reports), len(zap.sent))
 
 	def test_same_error_with_another_line_is_new(self):
 		zap = FakeZap(lambda line: response(200, "<b>Warning</b>: x in <b>/var/www/x.php</b> on line <b>9</b>"))
@@ -213,7 +246,8 @@ class TestFailures(ErrorTestBase):
 		self.assertEqual(len(findings), 2 * per_page)
 		self.assertEqual(len(errors), 1)
 		# 2 failed requests per page, plus the message that couldn't be read
-		self.assertIn("5 request(s) failed", errors[0]["basic_description"])
+		self.assertIn("4 request(s) failed", errors[0]["basic_description"])
+		self.assertIn("1 spider message(s) couldn't be read", errors[0]["basic_description"])
 
 	def test_failure_text_is_short_and_has_no_exception_text(self):
 		def respond(line):
@@ -240,6 +274,24 @@ class TestFailures(ErrorTestBase):
 		self.assertEqual(len(zap.sent), error.MAX_FAILURES_IN_A_ROW)
 		self.assertEqual(len(reports), 1)
 		self.assertIn("stopped after", reports[0]["basic_description"])
+
+	def test_unreadable_messages_do_not_stop_it(self):
+		zap = FakeZap(lambda line: response(500, TOMCAT_500), [{"requestHeader": "nonsense"}] * 25 + [message("/p?a=1")])
+		reports = error.error_suite(ARGS, zap).run()
+		self.assertEqual(len(zap.sent), 10)    # the last page is still attacked
+		self.assertNotIn("stopped", reports[-1]["basic_description"])
+		self.assertIn("25 spider message(s)", reports[-1]["basic_description"])
+
+	def test_not_stopped_when_the_last_request_is_the_20th_failure(self):
+		def respond(line):
+			raise Exception("down")
+		# 2 parameters x 10 attacks = exactly 20 requests, all failing
+		zap = FakeZap(respond, [message("/p?a=1&b=2")])
+		suite = error.error_suite(ARGS, zap)
+		reports = suite.run()
+		self.assertEqual(len(zap.sent), 20)
+		self.assertFalse(suite.stopped)
+		self.assertNotIn("stopped", reports[-1]["basic_description"])
 
 	def test_a_success_resets_the_count(self):
 		# every other request fails: never 20 in a row, so every page is tried

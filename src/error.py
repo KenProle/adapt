@@ -31,10 +31,8 @@ Below are the general points in this penetration testing:
 The goal of this penetration testing is create an exception on the backend services so we can try to do stack analysis to
 determine specific details about the application.
 '''
-import html
 import re
 import sys
-import urllib.parse
 from httpparser.httprequest import HTTPRequest
 from progress import ProgressBar
 
@@ -98,24 +96,28 @@ def find_error_signature(text):
 	found = find_error_signatures(text)
 	return found[0] if found else None
 
+_PHP_LEVEL_RE = re.compile(r"Fatal error|Parse error|Warning|Notice|Deprecated", re.IGNORECASE)
+_PHP_FUNCTION_RE = re.compile(r"[\w\\]{1,100}(?=\(\))")
 _PHP_LOCATION_RE = re.compile(r"[^\s<>'\"]{1,256}\.php(?:</b>)? on line (?:<b>)?\d{1,7}", re.IGNORECASE)
-_QUOTED_RE = re.compile(r"'[^'\r\n]{0,300}'|\"[^\"\r\n]{0,300}\"")
 
-def signature_key(signature, value=None):
+def signature_key(signature):
 	"""What a signature is compared by, between the unmodified page and an
-	attack's response: without the parameter value it may echo, so an error
-	that is on every page doesn't count as new because it quotes the input."""
-	# PHP: the file and line say which error it is; the message may quote
-	# anything
-	m = _PHP_LOCATION_RE.search(signature)
-	if(m):
-		return "php:"+m.group(0)
-	if(value):
-		for v in {value, urllib.parse.unquote_plus(value), html.escape(value)}:
-			# a short value ("1") would also be cut out of "ORA-00001"
-			if(len(v) >= 3):
-				signature = signature.replace(v, "")
-	return _QUOTED_RE.sub("''", signature)
+	attack's response.
+
+	A PHP error's message can quote the input, so an error that is on every
+	page would look new on each attack: it is compared by its level, the
+	function it names and its file and line instead. No other pattern can
+	match echoed input (they match fixed text, names and numbers), so those
+	are compared as they are."""
+	location = _PHP_LOCATION_RE.search(signature)
+	if(location):
+		level = _PHP_LEVEL_RE.match(signature)
+		function = _PHP_FUNCTION_RE.search(signature)
+		return "php:{}:{}:{}".format(
+			level.group(0).lower() if level else "",
+			function.group(0) if function else "",
+			location.group(0))
+	return signature
 
 def status_code(response_header):
 	"""Return the status code from a response's status line, or None."""
@@ -132,22 +134,34 @@ class error_suite():
 		# Failed requests are counted and skipped, so that one failure
 		# doesn't throw away everything found so far
 		self.failures = 0
+		self.unreadable = 0     # spider messages that couldn't be parsed
 		self.first_failure = None
-		# ...but after this many in a row, ZAP or the target has probably
-		# gone, and every remaining request would fail too, perhaps each
-		# after a timeout: stop rather than stall the scan
+		# ...but after this many failed requests in a row, ZAP or the target
+		# has probably gone, and every remaining request would fail too,
+		# perhaps each after a timeout: stop rather than stall the scan
 		self.in_a_row = 0
 		self.stopped = False
 
-	def __failed(self, what, reason):
+	def __should_stop(self):
+		# Checked before the next request, so "stopped" means something
+		# was actually skipped
+		if(self.in_a_row >= MAX_FAILURES_IN_A_ROW):
+			self.stopped = True
+		return self.stopped
+
+	def __failed(self, what, reason, request=True):
 		# Only the method, the path without its query or ;params, and a
 		# reason: an exception's own text can quote the whole request,
 		# session cookies included, a URL can carry a session token, and
-		# this goes to stderr and into the report
-		self.failures += 1
-		self.in_a_row += 1
-		if(self.in_a_row >= MAX_FAILURES_IN_A_ROW):
-			self.stopped = True
+		# this goes to stderr and into the report.
+		# A spider message that can't be parsed (request=False) sent no
+		# request, so it says nothing about ZAP or the target and doesn't
+		# count toward the stop
+		if(request):
+			self.failures += 1
+			self.in_a_row += 1
+		else:
+			self.unreadable += 1
 		if(self.first_failure is None):
 			if(len(what) > 200):
 				what = what[:200]+"..."
@@ -173,9 +187,9 @@ class error_suite():
 		get1_attacks += sqlInjectList
 		req_copy = ref_request.copy()
 		for k,ref_val in req_copy.path_params.items():
-			ref_keys = {signature_key(s, ref_val) for s in ref_signatures}
+			ref_keys = {signature_key(s) for s in ref_signatures}
 			for atk in get1_attacks :
-				if( self.stopped ):
+				if( self.__should_stop() ):
 					return report_list
 				where = self.__describe(req_copy, k)
 				# One failed attack mustn't lose the findings so far
@@ -191,7 +205,7 @@ class error_suite():
 						continue
 					self.in_a_row = 0
 					responseBody = str(resp.get('responseBody', ""))
-					new = [s for s in find_error_signatures( responseBody ) if signature_key(s, atk) not in ref_keys]
+					new = [s for s in find_error_signatures( responseBody ) if signature_key(s) not in ref_keys]
 				except Exception as e:
 					self.__failed(where, type(e).__name__)
 					continue
@@ -218,25 +232,32 @@ class error_suite():
 			bar = ProgressBar(maxval=len(messages))
 			if(self.args["adapt_general"]["verbose"]):bar.start()
 			for i in range(len(messages)):
-				if(self.stopped):
+				if(self.__should_stop()):
 					break
 				if(self.args["adapt_general"]["verbose"]):bar.update(i)
 				try:
 					reports = self.attack_url_via_get1_v2( messages[i] )
 				except Exception as e:
-					self.__failed("spider message {}".format(i), type(e).__name__)
+					# HTTPRequest.read and the message's fields; the attacks
+					# catch their own failures
+					self.__failed("spider message {}".format(i), type(e).__name__, request=False)
 					continue
 				if (reports):
 					report_list += reports
 			if(self.args["adapt_general"]["verbose"]):bar.finish()
 
-		if(self.failures):
+		if(self.failures or self.unreadable):
 			# Recorded as an error entry, so skipped requests can't look
 			# like a clean result
 			from owasp_suite import create_report
-			msg = "err_002: {} request(s) failed and were skipped; the first: {}".format(self.failures, self.first_failure)
+			parts = []
 			if(self.stopped):
-				msg = "err_002 stopped after {} failed requests in a row, so some pages weren't tested. ".format(MAX_FAILURES_IN_A_ROW) + msg[len("err_002: "):]
+				parts.append("stopped after {} failed requests in a row, so the remaining requests weren't sent".format(MAX_FAILURES_IN_A_ROW))
+			if(self.failures):
+				parts.append("{} request(s) failed and were skipped".format(self.failures))
+			if(self.unreadable):
+				parts.append("{} spider message(s) couldn't be read and were skipped".format(self.unreadable))
+			msg = "err_002: {}; the first: {}".format("; ".join(parts), self.first_failure)
 			print("ADAPT: "+msg, file=sys.stderr)
 			report_list.append(create_report("err_002", "ERROR: "+msg, error=True))
 		return report_list
