@@ -687,6 +687,7 @@ class owasp_suite():
 		try:
 			if(https):
 				ctx = ssl.create_default_context()
+				ctx.minimum_version = ssl.TLSVersion.TLSv1_2
 				# pentest target: certificate problems are reported elsewhere
 				ctx.check_hostname = False
 				ctx.verify_mode = ssl.CERT_NONE
@@ -1001,4 +1002,3 @@ class owasp_suite():
 		for s in sessions:
 			self.get_cookies_cache.append(s[1][1])
 		return self.__get_cookies(num)
-
