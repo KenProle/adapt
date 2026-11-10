@@ -96,6 +96,7 @@ class TestSignatures(unittest.TestCase):
 			"You have an error in your SQL syntax; check the manual",
 			"ORA-00933: SQL command not properly ended",
 			"    at Object.<anonymous> (/app/server.js:10:5)",
+			"    at /app/server.js:10:5",
 			"Traceback <em>(most recent call last)</em>",
 			"app/models/user.rb:12:in 'Integer#/'",
 			"app/models/user.rb:12:in `divide'",
@@ -165,6 +166,25 @@ class TestAttack(ErrorTestBase):
 		reports = error.error_suite(ARGS, zap).attack_url_via_get1_v2(message("/p?a=1", TOMCAT_500))
 		self.assertEqual(reports, [])
 
+	def test_error_that_echoes_the_input_is_not_new(self):
+		def page(value):
+			return "<b>Warning</b>: bad id '{}' in <b>/var/www/x.php</b> on line <b>3</b>".format(value)
+		zap = FakeZap(lambda line: response(200, page(params(line).get("a", ""))))
+		reports = error.error_suite(ARGS, zap).attack_url_via_get1_v2(message("/p?a=123", page("123")))
+		self.assertEqual(reports, [])
+
+	def test_signature_key(self):
+		self.assertEqual(error.signature_key("Warning</b>: bad 'x' in <b>/a/x.php</b> on line <b>3"),
+			error.signature_key("Warning</b>: other 'y' in <b>/a/x.php</b> on line <b>3"))
+		self.assertEqual(error.signature_key("ORA-00001"), error.signature_key("ORA-00001", "1"))
+		self.assertEqual(error.signature_key("near abc' OR x=1 here", "abc' OR x=1"), error.signature_key("near  here"))
+
+	def test_same_error_with_another_line_is_new(self):
+		zap = FakeZap(lambda line: response(200, "<b>Warning</b>: x in <b>/var/www/x.php</b> on line <b>9</b>"))
+		notice = "<b>Warning</b>: x in <b>/var/www/x.php</b> on line <b>3</b>"
+		reports = error.error_suite(ARGS, zap).attack_url_via_get1_v2(message("/p?a=1", notice))
+		self.assertEqual(len(reports), len(zap.sent))
+
 	def test_new_error_on_a_page_with_a_notice_is_reported(self):
 		notice = "<b>Deprecated</b>: old() in <b>/var/www/x.php</b> on line <b>3</b>"
 		def respond(line):
@@ -203,6 +223,35 @@ class TestFailures(ErrorTestBase):
 		text = reports[0]["basic_description"]
 		self.assertNotIn("secret", text)
 		self.assertLess(len(text), 400)    # the "A"*2048 request line is cut short
+
+	def test_failure_text_has_no_query_or_path_params(self):
+		def respond(line):
+			raise Exception("down")
+		reports = error.error_suite(ARGS, FakeZap(respond, [message("/p;jsessionid=SECRET1?sid=SECRET2&a=1")])).run()
+		text = reports[-1]["basic_description"]
+		self.assertNotIn("SECRET", text)
+		self.assertIn("GET /p (parameter", text)
+
+	def test_stops_after_failures_in_a_row(self):
+		def respond(line):
+			raise Exception("ZAP is gone")
+		zap = FakeZap(respond, [message("/p{}?a=1&b=2".format(i)) for i in range(10)])
+		reports = error.error_suite(ARGS, zap).run()
+		self.assertEqual(len(zap.sent), error.MAX_FAILURES_IN_A_ROW)
+		self.assertEqual(len(reports), 1)
+		self.assertIn("stopped after", reports[0]["basic_description"])
+
+	def test_a_success_resets_the_count(self):
+		# every other request fails: never 20 in a row, so every page is tried
+		def respond(line):
+			p = params(line)
+			if p.get("a", "x") == "" or p.get("a", "").startswith("'"):
+				raise Exception("flaky")
+			return response(200, "ok")
+		zap = FakeZap(respond, [message("/p{}?a=1".format(i)) for i in range(10)])
+		reports = error.error_suite(ARGS, zap).run()
+		self.assertEqual(len(zap.sent), 10 * 10)
+		self.assertNotIn("stopped", reports[-1]["basic_description"])
 
 	def test_a_failure_while_writing_keeps_the_page_findings(self):
 		zap = FakeZap(lambda line: response(500, TOMCAT_500))
