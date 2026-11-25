@@ -1,0 +1,40 @@
+name: Vulnerability check
+
+# Checks the Python packages in requirements.txt, and the packages pip resolves
+# for them, against published advisories (PyPI's advisory data and OSV). It runs
+# daily as well as on changes, so an advisory against a dependency nobody
+# touched still turns it red. It sees only public advisory databases.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  pip-audit:
+    name: Vulnerability check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.14"
+      - name: Install pip-audit
+        # Pinned; upgrade deliberately (see CLAUDE.md's dependency policy).
+        run: |
+          python -m venv "$RUNNER_TEMP/audit"
+          "$RUNNER_TEMP/audit/bin/python" -m pip install --quiet pip-audit==2.10.1
+      - name: pip-audit
+        # Resolves requirements.txt in an isolated environment and fails on any
+        # known vulnerability. wig is a git pin that isn't on PyPI, so pip-audit
+        # lists it as skipped; the packages it pulls in are still audited.
+        run: '"$RUNNER_TEMP/audit/bin/pip-audit" --requirement requirements.txt --progress-spinner off'

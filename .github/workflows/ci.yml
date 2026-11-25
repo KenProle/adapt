@@ -1,0 +1,60 @@
+name: CI
+
+# Unit tests and static checks on every pull request and push to master. Real
+# scans against DVWA stay manual (see CLAUDE.md). The ruleset on master requires
+# the jobs below by name, so renaming one means updating the ruleset too.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# Nothing by default; each job asks for only what it needs.
+permissions: {}
+
+jobs:
+  test:
+    name: Unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # The supported minimum (install.sh requires 3.12+) and the version
+        # ADAPT is tested with.
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the pinned requirements
+        # Into a venv outside the checkout, so the tests that need zapv2 run
+        # instead of skipping, and compileall below doesn't walk the venv.
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet -r requirements.txt
+      - name: Unit tests
+        run: '"$RUNNER_TEMP/venv/bin/python" -m unittest discover -v tests'
+      - name: Byte-compile every module
+        # Catches syntax errors in code the unit tests don't import.
+        run: '"$RUNNER_TEMP/venv/bin/python" -m compileall -q .'
+
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: ShellCheck
+        # install.sh runs with sudo. Errors only for now; raise the severity
+        # once the existing warnings are fixed.
+        run: |
+          shellcheck --version
+          shellcheck --severity=error install.sh lib/dvwa/setup-dvwa.sh

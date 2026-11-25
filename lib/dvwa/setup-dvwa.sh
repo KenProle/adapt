@@ -9,7 +9,7 @@ then
 	echo "FAILED"
 	echo "ADAPT's installer doesn't install Docker; see the DVWA section of doc/installing.md,"
 	echo "or run: sudo apt-get install docker.io"
-	exit -1
+	exit 1
 else
 	echo "PASSED"
 fi
@@ -19,7 +19,7 @@ if [[ ! -f /var/run/docker.pid ]]
 then
 	echo "FAILED"
 	echo "Please start the docker daemon"
-	exit -1
+	exit 1
 else
 	echo "PASSED"
 fi
@@ -31,7 +31,7 @@ if [[ $? -ne 0 ]]
 then
 	echo "FAILED"
 	echo "Make sure user ${USER} is a member of the docker group"
-	exit -1
+	exit 1
 else
 	echo "PASSED"
 fi
