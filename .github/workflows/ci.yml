@@ -36,7 +36,6 @@ jobs:
         # instead of skipping, and compileall below doesn't walk the venv.
         run: |
           python -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet --upgrade pip
           "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet -r requirements.txt
       - name: Unit tests
         run: '"$RUNNER_TEMP/venv/bin/python" -m unittest discover -v tests'
