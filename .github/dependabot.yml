@@ -1,0 +1,12 @@
+# Version updates for the GitHub Actions in .github/workflows/ only, bumping the
+# pinned SHA and its version comment together. Python packages are pinned on
+# purpose (see CLAUDE.md) and watched by the daily Vulnerability check instead.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

@@ -17,7 +17,7 @@ All commands must be run from the repo root: every module resolves paths via `os
 - Test an auth module standalone: `python3 login_format.py` (calls `service_auth("admin","password")` and prints the result).
 - Vulnerable test target: `lib/dvwa/setup-dvwa.sh` starts a DVWA docker container (default creds admin/password; the user must be in the `docker` group). `login_format.py` is written for DVWA.
 
-Unit tests for small local modules live in `tests/` (standard-library `unittest`): `python3 -m unittest discover tests`. Most behaviour is only checked by a real scan (against DVWA or another target); there is no linter or build step.
+Unit tests for small local modules live in `tests/` (standard-library `unittest`): `python3 -m unittest discover tests`. Most behaviour is only checked by a real scan (against DVWA or another target); there is no linter or build step beyond the CI checks below.
 
 ## Configuration flow
 
@@ -66,6 +66,22 @@ Treat as security-sensitive and review closely:
 - File paths built from config or target input, including the local names of logs downloaded over SSH.
 - Network code that talks to the target: the raw-socket CONNECT in `inpval_003`, `requests`/`urllib` calls, wig, and ZAP API calls.
 - Credentials and code loading: auth modules, how `zap_interface` imports the module named by `auth_module` in config, `//stdin` prompts, and the SSH/SFTP log retrieval in `adapt.py` (SSH password, host-key policy).
+
+## CI
+
+- `.github/workflows/ci.yml` runs on every PR and push to `master`.
+  - **Unit tests (Python 3.12 and 3.14):** installs `requirements.txt` into a venv (so the tests that need `zapv2` run instead of skipping), runs `python -m unittest discover tests`, and byte-compiles every module.
+  - **Shell scripts:** runs `shellcheck --severity=error` on `install.sh` and `lib/dvwa/setup-dvwa.sh`. Raise the severity once the existing warnings are fixed.
+  - Real scans against DVWA are not in CI; they stay manual.
+- `.github/workflows/vulncheck.yml` (job `Vulnerability check`) runs `pip-audit` (pinned) against `requirements.txt` and what pip resolves for it.
+  - It runs on PRs, pushes to `master`, daily and on manual dispatch.
+  - It sees only public advisory databases. wig (a git pin) is reported as skipped, not audited.
+  - A red daily run means fixing the finding in its own PR, following the dependency policy below. GitHub turns off a schedule after 60 days without repository activity; re-enable it in the Actions tab.
+- `.github/dependabot.yml` opens one grouped PR a month for GitHub Actions updates only. Python packages are pinned on purpose and watched by the daily check.
+- **Workflow rules:**
+  - Every `uses:` is pinned to a full commit SHA with the release in a trailing comment (`@<sha> # v7.0.1`). Look the SHA up live (`gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, dereferencing annotated tags); never copy one from memory.
+  - Workflows set `permissions: {}` and grant per job, and checkouts use `persist-credentials: false`.
+- `master` is protected by a ruleset that requires a pull request and the jobs `Unit tests (Python 3.12)`, `Unit tests (Python 3.14)`, `Shell scripts` and `Vulnerability check`, and blocks force-pushes and deletion. Renaming a job means updating the ruleset too. The repo owner has an admin bypass for emergencies only.
 
 ## Third-party dependencies
 
